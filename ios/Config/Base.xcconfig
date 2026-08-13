@@ -1,0 +1,22 @@
+// Signing values are intentionally neutral. Set a unique bundle identifier and
+// team locally in Xcode before installing on a physical device.
+PRODUCT_NAME = Divan
+PRODUCT_BUNDLE_IDENTIFIER = com.furkancanyilmaz.divan
+MARKETING_VERSION = 2026.8.10
+CURRENT_PROJECT_VERSION = 5
+IPHONEOS_DEPLOYMENT_TARGET = 16.0
+SWIFT_VERSION = 5.0
+TARGETED_DEVICE_FAMILY = 1,2
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM = 
+CODE_SIGN_ENTITLEMENTS = Divan/Divan.entitlements
+ENABLE_USER_SCRIPT_SANDBOXING = NO
+CLANG_ENABLE_MODULES = YES
+LOCALIZATION_PREFERS_STRING_CATALOGS = YES
+GENERATE_INFOPLIST_FILE = NO
+INFOPLIST_FILE = Divan/Resources/Info.plist
+FRAMEWORK_SEARCH_PATHS = $(inherited) $(PROJECT_DIR)/Vendor
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks
+SWIFT_OBJC_BRIDGING_HEADER = Divan/Divan-Bridging-Header.h

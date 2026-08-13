@@ -1,0 +1,44 @@
+# --- Kişisel veri ve çalışma zamanı durumu (asla depoya girmez) ---
+*.db
+*.db-shm
+*.db-wal
+*.db.device-id
+*.sqlite*
+yedekler/
+*.log
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+
+# --- macOS / Swift ---
+.build/
+.swiftpm/
+dist/
+DerivedData/
+.DS_Store
+
+# --- Xcode / iOS ---
+ios/Vendor/
+ios/build/
+xcuserdata/
+*.ipa
+
+# --- Android ---
+android/build/
+android/app/build/
+android/.gradle/
+android/.gradle-user/
+android/local.properties
+*.apk
+
+# --- Görseller: portreler indirilerek üretilir, depoya işlenmez ---
+assets/portraits/*.jpg
+assets/portraits/*.png
+!assets/portraits/README.md
+
+# --- Editör ---
+.vscode/
+.idea/
+*.swp

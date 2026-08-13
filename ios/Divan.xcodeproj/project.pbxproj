@@ -1,0 +1,360 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* DivanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* DivanApp.swift */; };
+		A10000000000000000000002 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* RootView.swift */; };
+		A10000000000000000000003 /* PythonRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* PythonRuntime.swift */; };
+		A10000000000000000000004 /* CPythonServerBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* CPythonServerBackend.swift */; };
+		A10000000000000000000005 /* DivanEmbeddedPythonRuntime.m in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000005 /* DivanEmbeddedPythonRuntime.m */; };
+		A10000000000000000000006 /* DivanPythonModule.m in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000006 /* DivanPythonModule.m */; };
+		A10000000000000000000007 /* LoopbackURLPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000007 /* LoopbackURLPolicy.swift */; };
+		A10000000000000000000008 /* DivanWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* DivanWebView.swift */; };
+		A10000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* Assets.xcassets */; };
+		A1000000000000000000000A /* Python.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000A /* Python.xcframework */; };
+		A1000000000000000000000B /* Python.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000A /* Python.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A1000000000000000000000C /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000B /* Security.framework */; };
+		A1000000000000000000000D /* DivanNativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* DivanNativeBridge.swift */; };
+		A1000000000000000000000E /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* PrivacyInfo.xcprivacy */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C10000000000000000000005 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				A1000000000000000000000B /* Python.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		B10000000000000000000001 /* DivanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DivanApp.swift; sourceTree = "<group>"; };
+		B10000000000000000000002 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		B10000000000000000000003 /* PythonRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PythonRuntime.swift; sourceTree = "<group>"; };
+		B10000000000000000000004 /* CPythonServerBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPythonServerBackend.swift; sourceTree = "<group>"; };
+		B10000000000000000000005 /* DivanEmbeddedPythonRuntime.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = DivanEmbeddedPythonRuntime.m; sourceTree = "<group>"; };
+		B10000000000000000000006 /* DivanPythonModule.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = DivanPythonModule.m; sourceTree = "<group>"; };
+		B10000000000000000000007 /* LoopbackURLPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopbackURLPolicy.swift; sourceTree = "<group>"; };
+		B10000000000000000000008 /* DivanWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DivanWebView.swift; sourceTree = "<group>"; };
+		B10000000000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B1000000000000000000000A /* Python.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = Python.xcframework; sourceTree = "<group>"; };
+		B1000000000000000000000B /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		B1000000000000000000000C /* Divan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Divan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1000000000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B1000000000000000000000E /* DivanEmbeddedPythonRuntime.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DivanEmbeddedPythonRuntime.h; sourceTree = "<group>"; };
+		B1000000000000000000000F /* DivanPythonModule.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DivanPythonModule.h; sourceTree = "<group>"; };
+		B10000000000000000000010 /* Divan-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Divan-Bridging-Header.h"; sourceTree = "<group>"; };
+		B10000000000000000000011 /* ios_entry.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = ios_entry.py; sourceTree = "<group>"; };
+		B10000000000000000000012 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		B10000000000000000000013 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		B10000000000000000000014 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		B10000000000000000000015 /* DivanNativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DivanNativeBridge.swift; sourceTree = "<group>"; };
+		B10000000000000000000016 /* prepare_python_bundle.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = prepare_python_bundle.sh; sourceTree = "<group>"; };
+		B10000000000000000000017 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B10000000000000000000018 /* Divan.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Divan.entitlements; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C10000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000000000000000000000A /* Python.xcframework in Frameworks */,
+				A1000000000000000000000C /* Security.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D10000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				D10000000000000000000002 /* Divan */,
+				D10000000000000000000006 /* DivanPython */,
+				D10000000000000000000007 /* Config */,
+				D1000000000000000000000B /* Scripts */,
+				D10000000000000000000008 /* Vendor */,
+				D10000000000000000000009 /* Frameworks */,
+				D1000000000000000000000A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D10000000000000000000002 /* Divan */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000001 /* DivanApp.swift */,
+				B10000000000000000000018 /* Divan.entitlements */,
+				B10000000000000000000002 /* RootView.swift */,
+				B10000000000000000000010 /* Divan-Bridging-Header.h */,
+				D10000000000000000000003 /* Runtime */,
+				D10000000000000000000004 /* Web */,
+				D10000000000000000000005 /* Resources */,
+			);
+			path = Divan;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000003 /* Runtime */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000003 /* PythonRuntime.swift */,
+				B10000000000000000000004 /* CPythonServerBackend.swift */,
+				B1000000000000000000000E /* DivanEmbeddedPythonRuntime.h */,
+				B10000000000000000000005 /* DivanEmbeddedPythonRuntime.m */,
+				B1000000000000000000000F /* DivanPythonModule.h */,
+				B10000000000000000000006 /* DivanPythonModule.m */,
+			);
+			path = Runtime;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000004 /* Web */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000007 /* LoopbackURLPolicy.swift */,
+				B10000000000000000000008 /* DivanWebView.swift */,
+				B10000000000000000000015 /* DivanNativeBridge.swift */,
+			);
+			path = Web;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000005 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				B1000000000000000000000D /* Info.plist */,
+				B10000000000000000000017 /* PrivacyInfo.xcprivacy */,
+				B10000000000000000000009 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000006 /* DivanPython */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000011 /* ios_entry.py */,
+			);
+			path = DivanPython;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000007 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000012 /* Base.xcconfig */,
+				B10000000000000000000013 /* Debug.xcconfig */,
+				B10000000000000000000014 /* Release.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000008 /* Vendor */ = {
+			isa = PBXGroup;
+			children = (
+				B1000000000000000000000A /* Python.xcframework */,
+			);
+			path = Vendor;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000009 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				B1000000000000000000000B /* Security.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		D1000000000000000000000A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B1000000000000000000000C /* Divan.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D1000000000000000000000B /* Scripts */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000016 /* prepare_python_bundle.sh */,
+			);
+			path = Scripts;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		E10000000000000000000001 /* Divan */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E10000000000000000000002 /* Build configuration list for PBXNativeTarget "Divan" */;
+			buildPhases = (
+				C10000000000000000000001 /* Sources */,
+				C10000000000000000000002 /* Frameworks */,
+				C10000000000000000000003 /* Resources */,
+				C10000000000000000000004 /* Install Divan Python App */,
+				C10000000000000000000005 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Divan;
+			productName = Divan;
+			productReference = B1000000000000000000000C /* Divan.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E10000000000000000000003 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					E10000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = E10000000000000000000004 /* Build configuration list for PBXProject "Divan" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = tr;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+				tr,
+			);
+			mainGroup = D10000000000000000000001;
+			productRefGroup = D1000000000000000000000A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E10000000000000000000001 /* Divan */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C10000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000000000000000000000E /* PrivacyInfo.xcprivacy in Resources */,
+				A10000000000000000000009 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		C10000000000000000000004 /* Install Divan Python App */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(PROJECT_DIR)/Scripts/prepare_python_bundle.sh",
+			);
+			name = "Install Divan Python App";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(CODESIGNING_FOLDER_PATH)/app/ios_entry.py",
+				"$(CODESIGNING_FOLDER_PATH)/python/lib",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$PROJECT_DIR/Scripts/prepare_python_bundle.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C10000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* DivanApp.swift in Sources */,
+				A10000000000000000000002 /* RootView.swift in Sources */,
+				A10000000000000000000003 /* PythonRuntime.swift in Sources */,
+				A10000000000000000000004 /* CPythonServerBackend.swift in Sources */,
+				A10000000000000000000005 /* DivanEmbeddedPythonRuntime.m in Sources */,
+				A10000000000000000000006 /* DivanPythonModule.m in Sources */,
+				A10000000000000000000007 /* LoopbackURLPolicy.swift in Sources */,
+				A10000000000000000000008 /* DivanWebView.swift in Sources */,
+				A1000000000000000000000D /* DivanNativeBridge.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		F10000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				SDKROOT = iphoneos;
+			};
+			name = Debug;
+		};
+		F10000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				SDKROOT = iphoneos;
+			};
+			name = Release;
+		};
+		F10000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B10000000000000000000013 /* Debug.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		F10000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B10000000000000000000014 /* Release.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		E10000000000000000000002 /* Build configuration list for PBXNativeTarget "Divan" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10000000000000000000003 /* Debug */,
+				F10000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E10000000000000000000004 /* Build configuration list for PBXProject "Divan" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10000000000000000000001 /* Debug */,
+				F10000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = E10000000000000000000003 /* Project object */;
+}

@@ -1,0 +1,32 @@
+DIVAN — macOS 2026.08.11.3
+
+KURULUM
+1. Divan.app uygulamasını Applications / Uygulamalar klasörüne sürükleyin.
+2. İlk açılışta Divan.app üzerine sağ tıklayıp “Aç”ı seçin.
+3. Divan varsayılan tarayıcınızda açılır.
+
+GEREKSİNİM
+- macOS 11 veya daha yeni bir sürüm
+- Python 3.9 veya daha yeni bir sürüm
+
+Bu paket Apple Developer ID ile noterlenmemiş, yerel olarak imzalanmıştır.
+Bu nedenle macOS ilk açılışta sağ tık → Aç isteyebilir.
+
+Divan her açılışta yalnız bu pakete ait, doğrulanmış yerel sunucuyu kullanır.
+Başka veya eski bir Divan sunucusuna sessizce bağlanmaz.
+
+VERİLER VE GİZLİLİK
+- Paket sohbet geçmişi, API anahtarı veya veritabanı içermez.
+- İlk açılışta temiz bir veritabanı oluşturulur.
+- Verileriniz yalnızca şu klasörde tutulur:
+  ~/Library/Application Support/Divan
+- Veri klasörü ve veritabanı yalnızca Mac kullanıcı hesabınız tarafından
+  okunabilecek izinlerle oluşturulur.
+- Uzak model API anahtarları veritabanı yerine macOS Anahtar Zinciri'nde
+  tutulur; sohbet yedeğine eklenmez.
+- Model ve API ayarlarını Divan içindeki Ayarlar bölümünden yapabilirsiniz.
+- LM Studio seçildiğinde model trafiği yalnız bu bilgisayarda kalır.
+
+GÜNCELLEME
+Yeni Divan.app sürümünü eskisinin üzerine kopyalayabilirsiniz. Uygulama verileri
+ayrı klasörde tutulduğu için görüşmeleriniz korunur.
