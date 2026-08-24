@@ -61,6 +61,16 @@ class ExperientialProtocolTestCase(HTTPTestCase):
 
     def propose_and_consent(self, conv_id, therapist, node_id, intensity=3):
         method = self.method_for_node(therapist, node_id)
+        if method["risk_level"] == "enhanced":
+            status, meta, _ = self.post(
+                "/api/session-meta",
+                conv_id=conv_id,
+                precheck_done=True,
+                safety_ok=True,
+                anxiety_start=intensity,
+                intensity_limit=10,
+            )
+            self.assertEqual(status, 200, meta)
         status, proposed, _ = self.post(
             "/api/technique-run",
             conv_id=conv_id,
@@ -1195,9 +1205,9 @@ class ReparentingProtocolV2Tests(ExperientialProtocolTestCase):
         conv_id, _, work, _ = self.open_imagery()
         with app.db() as conn:
             conn.execute(
-                "INSERT INTO session_meta(conv,intensity_limit,updated) "
-                "VALUES(?,?,?)",
-                (conv_id, 5, app.now()),
+                "UPDATE session_meta SET intensity_limit=?,updated=? "
+                "WHERE conv=?",
+                (5, app.now(), conv_id),
             )
         status, body, _ = self.imagery_turn(
             conv_id,

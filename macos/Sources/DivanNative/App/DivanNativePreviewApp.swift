@@ -26,21 +26,28 @@ struct DivanApp: App {
     @StateObject private var model: DivanViewModel
     private let runtimeLoader: DivanRuntimeLoader
     private let advancedDataSource: any AdvancedWorkspaceDataSource
+    private let structuredDataSource: any StructuredTherapyDataSource
 
     init() {
         let loader = DivanRuntimeLoader(controller: RuntimeController())
         runtimeLoader = loader
         advancedDataSource = CoreAdvancedWorkspaceDataSource(loader: loader)
+        structuredDataSource = CoreStructuredTherapyDataSource(loader: loader)
         let displayPreferencesStore = UserDefaultsDivanDisplayPreferencesStore()
         _model = StateObject(wrappedValue: DivanViewModel(
             dataSource: CoreDivanUIDataSource(loader: loader),
-            displayPreferencesStore: displayPreferencesStore
+            displayPreferencesStore: displayPreferencesStore,
+            schemaChatDraftStore: KeychainSchemaChatDraftStore()
         ))
     }
 
     var body: some Scene {
         WindowGroup("Divan") {
-            DivanRootView(model: model, advancedDataSource: advancedDataSource)
+            DivanRootView(
+                model: model,
+                advancedDataSource: advancedDataSource,
+                structuredDataSource: structuredDataSource
+            )
                 .frame(minWidth: 480, minHeight: 360)
                 .task {
                     appDelegate.runtimeLoader = runtimeLoader

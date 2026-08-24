@@ -35,6 +35,7 @@ final class DivanNativeBridge: NSObject, WKScriptMessageHandlerWithReply,
         "scanSyncQr",
         "completionNotifications",
         "haptic",
+        "reminders",
     ]
 
     static var bootstrapScript: WKUserScript {
@@ -144,6 +145,10 @@ final class DivanNativeBridge: NSObject, WKScriptMessageHandlerWithReply,
         case "haptic":
             performHaptic(style: payload["style"] as? String)
             replyHandler(true, nil)
+        case "scheduleReminderNotification":
+            scheduleReminderNotification(payload, reply: replyHandler)
+        case "cancelReminderNotification":
+            cancelReminderNotification(payload, reply: replyHandler)
         default:
             replyHandler(bridgeFailure("unsupported"), nil)
         }
@@ -401,6 +406,85 @@ final class DivanNativeBridge: NSObject, WKScriptMessageHandlerWithReply,
             trigger: nil
         )
         UNUserNotificationCenter.current().add(request)
+    }
+
+    // MARK: - ADHD koçu görev hatırlatıcıları
+
+    private static let reminderNotificationPrefix = "divan-reminder-"
+    private static let maximumReminderDelaySeconds: TimeInterval = 366 * 24 * 3600
+
+    /// Gelecekteki bir ana sistem bildirimi kurar. Uygulama kapanmış olsa
+    /// bile bildirim iOS tarafından zamanında gösterilir.
+    private func scheduleReminderNotification(
+        _ payload: [String: Any],
+        reply: @escaping (Any?, String?) -> Void
+    ) {
+        let rawID = String(payload["id"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = String(payload["title"] as? String ?? "Divan")
+        let body = String(payload["body"] as? String ?? "")
+        let rawDelay = (payload["afterSeconds"] as? NSNumber)?.doubleValue ?? 0
+        guard !rawID.isEmpty, rawID.utf8.count <= 64,
+              title.utf8.count <= 120,
+              !body.isEmpty, body.utf8.count <= 500,
+              rawDelay.isFinite, rawDelay > 0 else {
+            reply(bridgeFailure("invalid_request"), nil)
+            return
+        }
+        let delay = min(max(rawDelay, 1), Self.maximumReminderDelaySeconds)
+        let identifier = Self.reminderNotificationPrefix + rawID
+        let deliver = { (granted: Bool) in
+            Task { @MainActor in
+                guard granted else {
+                    reply(bridgeFailure("permission_denied"), nil)
+                    return
+                }
+                let content = UNMutableNotificationContent()
+                content.title = title
+                content.body = body
+                content.sound = .default
+                let trigger = UNTimeIntervalNotificationTrigger(
+                    timeInterval: delay,
+                    repeats: false
+                )
+                let request = UNNotificationRequest(
+                    identifier: identifier,
+                    content: content,
+                    trigger: trigger
+                )
+                UNUserNotificationCenter.current().add(request)
+                reply(true, nil)
+            }
+        }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .notDetermined:
+                UNUserNotificationCenter.current().requestAuthorization(
+                    options: [.alert, .sound]
+                ) { granted, _ in deliver(granted) }
+            case .authorized, .provisional, .ephemeral:
+                deliver(true)
+            default:
+                deliver(false)
+            }
+        }
+    }
+
+    /// Kurulmuş bir görev bildirimini kaldırır (görev silindi/yapıldı).
+    private func cancelReminderNotification(
+        _ payload: [String: Any],
+        reply: @escaping (Any?, String?) -> Void
+    ) {
+        let rawID = String(payload["id"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawID.isEmpty, rawID.utf8.count <= 64 else {
+            reply(bridgeFailure("invalid_request"), nil)
+            return
+        }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.reminderNotificationPrefix + rawID]
+        )
+        reply(true, nil)
     }
 
     private func performHaptic(style: String?) {

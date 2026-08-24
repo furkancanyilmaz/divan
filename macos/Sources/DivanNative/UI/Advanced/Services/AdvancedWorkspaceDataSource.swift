@@ -94,4 +94,20 @@ public protocol AdvancedWorkspaceDataSource: Sendable {
         conflictID: String,
         resolution: WorkspaceSyncConflictResolution
     ) async throws -> WorkspaceWiFiSyncStatus
+
+    func resolveWiFiClinicalConfirmation(
+        conversationID: Int,
+        enabled: Bool
+    ) async throws -> WorkspaceWiFiSyncStatus
+}
+
+public extension AdvancedWorkspaceDataSource {
+    func resolveWiFiClinicalConfirmation(
+        conversationID: Int,
+        enabled: Bool
+    ) async throws -> WorkspaceWiFiSyncStatus {
+        throw DivanUIClientError(
+            "Bu sürüm cihazdaki Şema eşitleme onayını değiştiremiyor."
+        )
+    }
 }

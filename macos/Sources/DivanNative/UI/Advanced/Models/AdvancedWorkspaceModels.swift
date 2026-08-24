@@ -1,6 +1,9 @@
 import Foundation
 
 public enum AdvancedModule: String, CaseIterable, Identifiable, Sendable {
+    case adhdSupport
+    case schemaPath
+    case freudImagery
     case chairWork
     case reparenting
     case livingMap
@@ -10,6 +13,9 @@ public enum AdvancedModule: String, CaseIterable, Identifiable, Sendable {
 
     public var title: String {
         switch self {
+        case .adhdSupport: "Ritimler ve defter"
+        case .schemaPath: "Şema çalışma yolu"
+        case .freudImagery: "Görsel Serbest Çağrışım"
         case .chairWork: "Sandalye çalışması"
         case .reparenting: "İmgeleme ve yeniden ebeveynlik"
         case .livingMap: "Yaşayan harita"
@@ -19,6 +25,9 @@ public enum AdvancedModule: String, CaseIterable, Identifiable, Sendable {
 
     public var shortTitle: String {
         switch self {
+        case .adhdSupport: "ADHD"
+        case .schemaPath: "Şema yolu"
+        case .freudImagery: "Görsel çağrışım"
         case .chairWork: "Sandalye"
         case .reparenting: "Yeniden ebeveynlik"
         case .livingMap: "Yaşayan harita"
@@ -28,6 +37,12 @@ public enum AdvancedModule: String, CaseIterable, Identifiable, Sendable {
 
     public var subtitle: String {
         switch self {
+        case .adhdSupport:
+            "Haftalık küçük ritimler, bildirimsiz başlama ve kullanıcı kontrollü defter."
+        case .schemaPath:
+            "Dinleme, kullanıcı onaylı olasılık, yöntem, küçük deney ve takip yolu."
+        case .freudImagery:
+            "Freud Serbest Çağrışım sırasında literal kartlar ve kullanıcıya ait çağrışım."
         case .chairWork:
             "İki parçayı sırayla konuşturun; AI terapist yönerge ve gözlem sunsun."
         case .reparenting:
@@ -41,6 +56,9 @@ public enum AdvancedModule: String, CaseIterable, Identifiable, Sendable {
 
     public var systemImage: String {
         switch self {
+        case .adhdSupport: "checklist"
+        case .schemaPath: "point.3.connected.trianglepath.dotted"
+        case .freudImagery: "photo.on.rectangle.angled"
         case .chairWork: "chair.lounge"
         case .reparenting: "figure.and.child.holdinghands"
         case .livingMap: "point.3.connected.trianglepath.dotted"
@@ -81,8 +99,10 @@ public struct AdvancedWorkspaceSnapshot: Sendable {
     public let clinicalIntensityLimit: Int
     public let clinicalSafetyHold: Bool
     public let chairAvailable: Bool
+    public let chairRequiresPrecheck: Bool
     public let chairUnavailableReason: String?
     public let imageryAvailable: Bool
+    public let imageryRequiresPrecheck: Bool
     public let imageryUnavailableReason: String?
     public let chairConfiguration: WorkspaceChairConfiguration
     public let chairSession: WorkspaceChairSession?
@@ -94,8 +114,10 @@ public struct AdvancedWorkspaceSnapshot: Sendable {
         clinicalIntensityLimit: Int = 10,
         clinicalSafetyHold: Bool = false,
         chairAvailable: Bool = false,
+        chairRequiresPrecheck: Bool = false,
         chairUnavailableReason: String? = nil,
         imageryAvailable: Bool = false,
+        imageryRequiresPrecheck: Bool = false,
         imageryUnavailableReason: String? = nil,
         chairConfiguration: WorkspaceChairConfiguration = .twoPartDefault,
         chairSession: WorkspaceChairSession? = nil,
@@ -106,8 +128,10 @@ public struct AdvancedWorkspaceSnapshot: Sendable {
         self.clinicalIntensityLimit = max(1, clinicalIntensityLimit)
         self.clinicalSafetyHold = clinicalSafetyHold
         self.chairAvailable = chairAvailable
+        self.chairRequiresPrecheck = chairRequiresPrecheck
         self.chairUnavailableReason = chairUnavailableReason
         self.imageryAvailable = imageryAvailable
+        self.imageryRequiresPrecheck = imageryRequiresPrecheck
         self.imageryUnavailableReason = imageryUnavailableReason
         self.chairConfiguration = chairConfiguration
         self.chairSession = chairSession
@@ -414,6 +438,9 @@ public struct WorkspaceChairStartRequest: Sendable {
     public let intensity: Int
     public let orientationConfirmed: Bool
     public let frameConfirmed: Bool
+    public let realityConfirmed: Bool
+    public let sleepActivationClear: Bool
+    public let supportAvailable: Bool?
 
     public init(
         conversationID: Int?,
@@ -423,7 +450,10 @@ public struct WorkspaceChairStartRequest: Sendable {
         startingParticipantIndex: Int,
         intensity: Int,
         orientationConfirmed: Bool,
-        frameConfirmed: Bool
+        frameConfirmed: Bool,
+        realityConfirmed: Bool = false,
+        sleepActivationClear: Bool = false,
+        supportAvailable: Bool? = nil
     ) {
         self.conversationID = conversationID
         self.goalText = goalText
@@ -433,6 +463,9 @@ public struct WorkspaceChairStartRequest: Sendable {
         self.intensity = intensity
         self.orientationConfirmed = orientationConfirmed
         self.frameConfirmed = frameConfirmed
+        self.realityConfirmed = realityConfirmed
+        self.sleepActivationClear = sleepActivationClear
+        self.supportAvailable = supportAvailable
     }
 }
 
@@ -587,6 +620,8 @@ public struct WorkspaceImageryStartRequest: Sendable {
     public let realityConfirmed: Bool
     public let stopSignal: String
     public let sceneBoundary: String
+    public let sleepActivationClear: Bool
+    public let supportAvailable: Bool?
 
     public init(
         conversationID: Int?,
@@ -596,7 +631,9 @@ public struct WorkspaceImageryStartRequest: Sendable {
         frameConfirmed: Bool,
         realityConfirmed: Bool,
         stopSignal: String,
-        sceneBoundary: String
+        sceneBoundary: String,
+        sleepActivationClear: Bool = false,
+        supportAvailable: Bool? = nil
     ) {
         self.conversationID = conversationID
         self.intention = intention
@@ -606,6 +643,8 @@ public struct WorkspaceImageryStartRequest: Sendable {
         self.realityConfirmed = realityConfirmed
         self.stopSignal = stopSignal
         self.sceneBoundary = sceneBoundary
+        self.sleepActivationClear = sleepActivationClear
+        self.supportAvailable = supportAvailable
     }
 }
 
@@ -845,6 +884,8 @@ public enum WorkspaceWiFiSyncPhase: String, Sendable {
     case preparing
     case waitingForScan
     case transferring
+    case awaitingClinicalConfirmation
+    case awaitingClinicalSafety
     case completed
     case failed
     case cancelled
@@ -855,6 +896,10 @@ public enum WorkspaceWiFiSyncPhase: String, Sendable {
         case .preparing: "Güvenli bağlantı hazırlanıyor"
         case .waitingForScan: "QR kod taranmayı bekliyor"
         case .transferring: "Eşitleniyor"
+        case .awaitingClinicalConfirmation:
+            "Bu cihazda Şema onayı gerekli"
+        case .awaitingClinicalSafety:
+            "Güvenlik beklemesi"
         case .completed: "Eşitleme tamamlandı"
         case .failed: "Eşitleme tamamlanamadı"
         case .cancelled: "Eşitleme iptal edildi"
@@ -890,6 +935,24 @@ public struct WorkspaceSyncConflict: Identifiable, Hashable, Sendable {
     }
 }
 
+public enum WorkspaceSyncClinicalConfirmationDevice: String, Sendable {
+    case thisDevice = "this_device"
+    case computer
+}
+
+public struct WorkspaceSyncClinicalConfirmation:
+    Identifiable, Hashable, Sendable {
+    public let conversationID: Int
+    public let title: String
+
+    public var id: Int { conversationID }
+
+    public init(conversationID: Int, title: String) {
+        self.conversationID = conversationID
+        self.title = title
+    }
+}
+
 public enum WorkspaceSyncConflictResolution: String, CaseIterable, Identifiable, Sendable {
     case keepThisMac
     case keepOtherDevice
@@ -911,6 +974,17 @@ public struct WorkspaceWiFiSyncStatus: Sendable {
     public let progress: Double?
     public let recordsTransferred: Int
     public let conflicts: [WorkspaceSyncConflict]
+    public let clinicalConfirmationRequired: Bool
+    public let clinicalConfirmationDevice:
+        WorkspaceSyncClinicalConfirmationDevice?
+    public let clinicalConfirmationMessage: String?
+    public let pendingClinicalConfirmations:
+        [WorkspaceSyncClinicalConfirmation]
+    public let pendingClinicalConfirmationCount: Int
+    public let clinicalSafetyPause: Bool
+    public let clinicalSafetyDevice:
+        WorkspaceSyncClinicalConfirmationDevice?
+    public let clinicalSafetyMessage: String?
     public let secretsExcluded: Bool
     public let updatedAt: Date
 
@@ -925,6 +999,17 @@ public struct WorkspaceWiFiSyncStatus: Sendable {
         progress: Double? = nil,
         recordsTransferred: Int = 0,
         conflicts: [WorkspaceSyncConflict] = [],
+        clinicalConfirmationRequired: Bool = false,
+        clinicalConfirmationDevice:
+            WorkspaceSyncClinicalConfirmationDevice? = nil,
+        clinicalConfirmationMessage: String? = nil,
+        pendingClinicalConfirmations:
+            [WorkspaceSyncClinicalConfirmation] = [],
+        pendingClinicalConfirmationCount: Int = 0,
+        clinicalSafetyPause: Bool = false,
+        clinicalSafetyDevice:
+            WorkspaceSyncClinicalConfirmationDevice? = nil,
+        clinicalSafetyMessage: String? = nil,
         secretsExcluded: Bool = true,
         updatedAt: Date = Date()
     ) {
@@ -938,6 +1023,15 @@ public struct WorkspaceWiFiSyncStatus: Sendable {
         self.progress = progress
         self.recordsTransferred = recordsTransferred
         self.conflicts = conflicts
+        self.clinicalConfirmationRequired = clinicalConfirmationRequired
+        self.clinicalConfirmationDevice = clinicalConfirmationDevice
+        self.clinicalConfirmationMessage = clinicalConfirmationMessage
+        self.pendingClinicalConfirmations = pendingClinicalConfirmations
+        self.pendingClinicalConfirmationCount =
+            pendingClinicalConfirmationCount
+        self.clinicalSafetyPause = clinicalSafetyPause
+        self.clinicalSafetyDevice = clinicalSafetyDevice
+        self.clinicalSafetyMessage = clinicalSafetyMessage
         self.secretsExcluded = secretsExcluded
         self.updatedAt = updatedAt
     }

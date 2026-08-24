@@ -109,10 +109,31 @@ struct WiFiSyncView: View {
                 waitingForScan(status)
             case .transferring:
                 transferState(status)
+            case .awaitingClinicalConfirmation:
+                Label(
+                    "Olağan kayıtlar korunarak eşitleme güvenli biçimde durdu.",
+                    systemImage: "pause.circle"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            case .awaitingClinicalSafety:
+                Label(
+                    "Klinik çalışma aktarımı güvenlik beklemesi nedeniyle atlandı.",
+                    systemImage: "shield.lefthalf.filled"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
             case .completed:
                 completedState(status)
             case .failed, .cancelled:
                 restartActions(status)
+            }
+
+            if status.clinicalSafetyPause {
+                clinicalSafetyState(status)
+            } else if status.clinicalConfirmationRequired
+                        || status.pendingClinicalConfirmationCount > 0 {
+                clinicalConfirmationState(status)
             }
 
             if status.secretsExcluded {
@@ -124,6 +145,158 @@ struct WiFiSyncView: View {
         .advancedCard()
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(status.phase.isInProgress ? .updatesFrequently : [])
+    }
+
+    private func clinicalSafetyState(
+        _ status: WorkspaceWiFiSyncStatus
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(
+                "Şema kayıtları güvenlik beklemesinde",
+                systemImage: "shield.lefthalf.filled"
+            )
+            .font(.headline)
+            .foregroundStyle(DivanPalette.wine)
+            Text(
+                status.clinicalSafetyMessage
+                    ?? "Güvenlik beklemesi sürerken Şema çalışma kayıtları alınmadı."
+            )
+            .font(.callout)
+            .fixedSize(horizontal: false, vertical: true)
+            Label(
+                "Güvenlik beklemesi kapandıktan sonra yeni bir QR oluşturup yeniden eşitleyin.",
+                systemImage: "qrcode.viewfinder"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Button("Bekleme kapandıysa yeni QR oluştur") {
+                Task { await model.createSyncOffer() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.isPerformingAction)
+            .accessibilityIdentifier("syncSafetyCreateFreshQR")
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            DivanPalette.parchment.opacity(0.55),
+            in: RoundedRectangle(cornerRadius: 11)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 11)
+                .stroke(DivanPalette.gold.opacity(0.6))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("syncClinicalSafetyPause")
+    }
+
+    private func clinicalConfirmationState(
+        _ status: WorkspaceWiFiSyncStatus
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(
+                "Şema çalışmalarında bu cihazın kararı gerekli",
+                systemImage: "hand.raised.fill"
+            )
+            .font(.headline)
+            .foregroundStyle(DivanPalette.wine)
+            Text(
+                status.clinicalConfirmationMessage
+                    ?? "Eşitleme klinik çalışma kapsamı için açık cihaz onayı bekliyor."
+            )
+            .font(.callout)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if status.pendingClinicalConfirmations.isEmpty {
+                Label(
+                    status.clinicalConfirmationDevice == .computer
+                        ? "Onayı bilgisayar tarafında verin; sonra yeni bir QR oluşturun."
+                        : "Gerekli cihazda kararı verin; sonra yeni bir QR oluşturun.",
+                    systemImage: "iphone.and.arrow.forward"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Button("Onay verildiyse yeni QR oluştur") {
+                    Task { await model.createSyncOffer() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isPerformingAction)
+                .accessibilityIdentifier("syncClinicalCreateFreshQR")
+            } else {
+                ForEach(status.pendingClinicalConfirmations) { item in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(item.title)
+                            .font(.callout.weight(.semibold))
+                            .privacySensitive()
+                        Text(
+                            "Şema ve Yaşayan Harita kayıtlarını Mac ile Android arasında eşitlemek ayrı bir tercihtir; model sağlayıcısı onayı değişmez."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 8) {
+                                clinicalConfirmationButtons(item)
+                            }
+                            VStack(alignment: .leading, spacing: 8) {
+                                clinicalConfirmationButtons(item)
+                            }
+                        }
+                    }
+                    .padding(10)
+                    .background(
+                        .background,
+                        in: RoundedRectangle(cornerRadius: 9)
+                    )
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            DivanPalette.parchment.opacity(0.55),
+            in: RoundedRectangle(cornerRadius: 11)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 11)
+                .stroke(DivanPalette.gold.opacity(0.6))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("syncClinicalConfirmation")
+    }
+
+    @ViewBuilder
+    private func clinicalConfirmationButtons(
+        _ item: WorkspaceSyncClinicalConfirmation
+    ) -> some View {
+        Button("Bu cihazda onayla") {
+            Task {
+                await model.resolveSyncClinicalConfirmation(
+                    conversationID: item.conversationID,
+                    enabled: true
+                )
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(DivanPalette.wine)
+        .disabled(model.isPerformingAction)
+        .accessibilityIdentifier(
+            "syncClinicalConfirm.\(item.conversationID)"
+        )
+
+        Button("Kapalı tut", role: .destructive) {
+            Task {
+                await model.resolveSyncClinicalConfirmation(
+                    conversationID: item.conversationID,
+                    enabled: false
+                )
+            }
+        }
+        .buttonStyle(.bordered)
+        .disabled(model.isPerformingAction)
+        .accessibilityIdentifier(
+            "syncClinicalKeepOff.\(item.conversationID)"
+        )
     }
 
     private var idleControls: some View {
@@ -436,6 +609,8 @@ struct WiFiSyncView: View {
         case .preparing: "lock.rotation"
         case .waitingForScan: "qrcode"
         case .transferring: "arrow.triangle.2.circlepath"
+        case .awaitingClinicalConfirmation: "hand.raised.fill"
+        case .awaitingClinicalSafety: "shield.lefthalf.filled"
         case .completed: "checkmark.circle.fill"
         case .failed: "exclamationmark.triangle.fill"
         case .cancelled: "xmark.circle"
@@ -445,6 +620,7 @@ struct WiFiSyncView: View {
     private func phaseColor(_ phase: WorkspaceWiFiSyncPhase) -> Color {
         switch phase {
         case .completed: .green
+        case .awaitingClinicalConfirmation, .awaitingClinicalSafety: .orange
         case .failed: .red
         case .cancelled: .secondary
         default: DivanPalette.wine

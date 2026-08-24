@@ -4,6 +4,89 @@ import XCTest
 
 @MainActor
 final class AdvancedWorkspaceSafetyTests: XCTestCase {
+    func testSyncSafetyPauseWinsOverAnyStaleConsentProjection() {
+        let core = DeviceSyncStatus(
+            hostRunning: false,
+            busy: false,
+            secondsRemaining: 0,
+            lastSyncAt: "2026-08-22 12:10:00",
+            lastPeerName: "Android",
+            lastSummary: SyncSummary(
+                sent: 2,
+                received: 3,
+                conflicts: 0,
+                clinicalConfirmationRequired: true,
+                clinicalSafetyPause: true,
+                clinicalSafetyDevice: "this_device",
+                clinicalSafetyMessage: "Güvenlik beklemesi sürüyor."
+            ),
+            conflicts: [],
+            pendingClinicalConfirmationConversationIDs: [12],
+            pendingClinicalConfirmationCount: 1,
+            clinicalSafetyPause: true,
+            clinicalSafetyDevice: "this_device",
+            clinicalSafetyMessage: "Güvenlik beklemesi sürüyor.",
+            scope: [],
+            secretsExcluded: true
+        )
+        let projected = CoreAdvancedWorkspaceDataSource.workspaceSyncStatus(
+            core,
+            invitation: nil,
+            pendingClinicalConfirmations: [
+                .init(conversationID: 12, title: "Kerem Genç"),
+            ]
+        )
+
+        XCTAssertEqual(projected.phase, .awaitingClinicalSafety)
+        XCTAssertTrue(projected.clinicalSafetyPause)
+        XCTAssertFalse(projected.clinicalConfirmationRequired)
+        XCTAssertTrue(projected.pendingClinicalConfirmations.isEmpty)
+        XCTAssertEqual(projected.pendingClinicalConfirmationCount, 0)
+    }
+
+    func testFreshInvitationEscapesLastSafetySummaryWithoutGrantingConsent() {
+        let core = DeviceSyncStatus(
+            hostRunning: true,
+            busy: false,
+            secondsRemaining: 119,
+            lastSyncAt: "2026-08-22 12:10:00",
+            lastPeerName: "Android",
+            lastSummary: SyncSummary(
+                sent: 2,
+                received: 3,
+                conflicts: 0,
+                clinicalSafetyPause: true,
+                clinicalSafetyDevice: "this_device",
+                clinicalSafetyMessage: "Güvenlik beklemesi sürüyor."
+            ),
+            conflicts: [],
+            pendingClinicalConfirmationConversationIDs: [],
+            pendingClinicalConfirmationCount: 0,
+            clinicalSafetyPause: true,
+            clinicalSafetyDevice: "this_device",
+            clinicalSafetyMessage: "Güvenlik beklemesi sürüyor.",
+            scope: [],
+            secretsExcluded: true
+        )
+        let invitation = DeviceSyncInvitation(
+            pairingCode: "fresh-code",
+            qrMatrix: SyncQRMatrix(size: 1, rows: ["1"]),
+            secondsRemaining: 119
+        )
+        let startedAt = Date(timeIntervalSince1970: 1_787_395_800)
+        let projected = CoreAdvancedWorkspaceDataSource.workspaceSyncStatus(
+            core,
+            invitation: invitation,
+            activeInvitationStartedAt: startedAt,
+            pendingClinicalConfirmations: []
+        )
+
+        XCTAssertEqual(projected.phase, .waitingForScan)
+        XCTAssertEqual(projected.pairingCode, "fresh-code")
+        XCTAssertFalse(projected.clinicalSafetyPause)
+        XCTAssertFalse(projected.clinicalConfirmationRequired)
+    }
+
     func testChairStartValidationIsVisibleAndNeverCallsAdapter() async {
         let source = AdvancedSafetyDataSource()
         let model = makeModel(source)
@@ -68,6 +151,34 @@ final class AdvancedWorkspaceSafetyTests: XCTestCase {
         XCTAssertNil(model.failure)
         XCTAssertFalse(model.chairOrientationConfirmed)
         XCTAssertFalse(model.chairFrameConfirmed)
+    }
+
+    func testEnhancedChairStartRequiresFreshRealitySleepAndSupportAnswer() async throws {
+        let source = AdvancedSafetyDataSource(chairRequiresPrecheck: true)
+        let model = makeModel(source)
+        await model.reloadWorkspace()
+        model.chairGoalText = "İki sesi güvenle ayırmak"
+        model.chairStopSignal = "Dur"
+        model.chairParticipantTitles = ["İhtiyaç", "Koruma"]
+        model.chairOrientationConfirmed = true
+        model.chairFrameConfirmed = true
+
+        await model.startChairWork()
+        let incompleteCount = await source.chairStartCallCount()
+        XCTAssertEqual(incompleteCount, 0)
+        XCTAssertEqual(model.failure?.title, "Devam etmek için")
+
+        model.chairRealityConfirmed = true
+        model.chairSleepActivationClear = true
+        model.chairSupportAvailable = false
+        await model.startChairWork()
+
+        let captured = await source.capturedChairStart()
+        let request = try XCTUnwrap(captured)
+        XCTAssertTrue(request.realityConfirmed)
+        XCTAssertTrue(request.sleepActivationClear)
+        XCTAssertEqual(request.supportAvailable, false)
+        XCTAssertNil(model.chairSupportAvailable)
     }
 
     func testValidChairStartAdapterFailureBecomesVisibleState() async {
@@ -159,6 +270,32 @@ final class AdvancedWorkspaceSafetyTests: XCTestCase {
         XCTAssertFalse(model.imageryOrientationConfirmed)
         XCTAssertFalse(model.imageryFrameConfirmed)
         XCTAssertFalse(model.imageryRealityConfirmed)
+    }
+
+    func testEnhancedImageryStartRequiresFreshSleepAndSupportAnswer() async throws {
+        let source = AdvancedSafetyDataSource(imageryRequiresPrecheck: true)
+        let model = makeModel(source)
+        await model.reloadWorkspace()
+        model.imageryIntention = "Bugünkü ihtiyaca yaklaşmak"
+        model.imageryStopSignal = "Dur"
+        model.imagerySceneBoundary = "Odayı fark edeceğim"
+        model.imageryOrientationConfirmed = true
+        model.imageryFrameConfirmed = true
+        model.imageryRealityConfirmed = true
+
+        await model.startImagery()
+        let incompleteCount = await source.imageryStartCallCount()
+        XCTAssertEqual(incompleteCount, 0)
+
+        model.imagerySleepActivationClear = true
+        model.imagerySupportAvailable = true
+        await model.startImagery()
+
+        let captured = await source.capturedImageryStart()
+        let request = try XCTUnwrap(captured)
+        XCTAssertTrue(request.sleepActivationClear)
+        XCTAssertEqual(request.supportAvailable, true)
+        XCTAssertNil(model.imagerySupportAvailable)
     }
 
     func testValidImageryStartAdapterFailureBecomesVisibleState() async {
@@ -283,6 +420,24 @@ final class AdvancedWorkspaceSafetyTests: XCTestCase {
         )
     }
 
+    func testSyncClinicalConfirmationForwardsExplicitEnableAndKeepOffChoices() async {
+        let source = AdvancedSafetyDataSource()
+        let model = makeModel(source)
+
+        await model.resolveSyncClinicalConfirmation(
+            conversationID: 12,
+            enabled: true
+        )
+        await model.resolveSyncClinicalConfirmation(
+            conversationID: 19,
+            enabled: false
+        )
+
+        let captured = await source.capturedClinicalConfirmations()
+        XCTAssertEqual(captured, ["12|true", "19|false"])
+        XCTAssertNil(model.failure)
+    }
+
     private func makeModel(
         _ source: AdvancedSafetyDataSource
     ) -> AdvancedWorkspaceViewModel {
@@ -303,9 +458,12 @@ actor AdvancedSafetyDataSource: AdvancedWorkspaceDataSource {
     private let initialImagery: WorkspaceImagerySession?
     private let failingStart: AdvancedStartFailure?
     private let chairIsAvailable: Bool
+    private let chairNeedsPrecheck: Bool
     private let chairReason: String?
     private let imageryIsAvailable: Bool
+    private let imageryNeedsPrecheck: Bool
     private let imageryReason: String?
+    private let initialSyncStatus: WorkspaceWiFiSyncStatus
     private var lastChairStart: WorkspaceChairStartRequest?
     private var lastImageryStart: WorkspaceImageryStartRequest?
     private var chairStarts = 0
@@ -314,6 +472,7 @@ actor AdvancedSafetyDataSource: AdvancedWorkspaceDataSource {
     private var lastChairClosure: WorkspaceChairClosureRequest?
     private var chairStops = 0
     private var imageryStops = 0
+    private var clinicalConfirmations: [String] = []
 
     private var holdChairGuidance = false
     private var chairGuidanceStarted = false
@@ -327,17 +486,23 @@ actor AdvancedSafetyDataSource: AdvancedWorkspaceDataSource {
         imagery: WorkspaceImagerySession? = nil,
         failingStart: AdvancedStartFailure? = nil,
         chairAvailable: Bool = true,
+        chairRequiresPrecheck: Bool = false,
         chairUnavailableReason: String? = nil,
         imageryAvailable: Bool = true,
-        imageryUnavailableReason: String? = nil
+        imageryRequiresPrecheck: Bool = false,
+        imageryUnavailableReason: String? = nil,
+        syncStatus: WorkspaceWiFiSyncStatus = .idle
     ) {
         initialChair = chair
         initialImagery = imagery
         self.failingStart = failingStart
         chairIsAvailable = chairAvailable
+        chairNeedsPrecheck = chairRequiresPrecheck
         chairReason = chairUnavailableReason
         imageryIsAvailable = imageryAvailable
+        imageryNeedsPrecheck = imageryRequiresPrecheck
         imageryReason = imageryUnavailableReason
+        initialSyncStatus = syncStatus
     }
 
     func capturedChairResume() -> WorkspaceChairResumeRequest? { lastChairResume }
@@ -348,6 +513,9 @@ actor AdvancedSafetyDataSource: AdvancedWorkspaceDataSource {
     func imageryStartCallCount() -> Int { imageryStarts }
     func chairStopCallCount() -> Int { chairStops }
     func imageryStopCallCount() -> Int { imageryStops }
+    func capturedClinicalConfirmations() -> [String] {
+        clinicalConfirmations
+    }
 
     func suspendNextChairGuidance() { holdChairGuidance = true }
     func waitUntilChairGuidanceStarted() async {
@@ -375,11 +543,14 @@ actor AdvancedSafetyDataSource: AdvancedWorkspaceDataSource {
         AdvancedWorkspaceSnapshot(
             clinicalIntensityLimit: 7,
             chairAvailable: chairIsAvailable,
+            chairRequiresPrecheck: chairNeedsPrecheck,
             chairUnavailableReason: chairReason,
             imageryAvailable: imageryIsAvailable,
+            imageryRequiresPrecheck: imageryNeedsPrecheck,
             imageryUnavailableReason: imageryReason,
             chairSession: initialChair,
-            imagerySession: initialImagery
+            imagerySession: initialImagery,
+            syncStatus: initialSyncStatus
         )
     }
 
@@ -530,7 +701,9 @@ actor AdvancedSafetyDataSource: AdvancedWorkspaceDataSource {
         throw AdvancedSafetyTestError.unexpectedCall
     }
 
-    func wifiSyncStatus() async throws -> WorkspaceWiFiSyncStatus { .idle }
+    func wifiSyncStatus() async throws -> WorkspaceWiFiSyncStatus {
+        initialSyncStatus
+    }
     func createWiFiSyncOffer() async throws -> WorkspaceWiFiSyncStatus { .idle }
     func joinWiFiSync(
         code: String,
@@ -541,6 +714,13 @@ actor AdvancedSafetyDataSource: AdvancedWorkspaceDataSource {
         conflictID: String,
         resolution: WorkspaceSyncConflictResolution
     ) async throws -> WorkspaceWiFiSyncStatus { .idle }
+    func resolveWiFiClinicalConfirmation(
+        conversationID: Int,
+        enabled: Bool
+    ) async throws -> WorkspaceWiFiSyncStatus {
+        clinicalConfirmations.append("\(conversationID)|\(enabled)")
+        return .idle
+    }
 }
 
 enum AdvancedStartFailure: Sendable {

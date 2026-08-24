@@ -1,0 +1,420 @@
+{
+  "fixture_version": 8,
+  "protocol": "schema_path_chat_v5",
+  "version": 5,
+  "presentation": "chat_only",
+  "stage": "listen",
+  "step": "candidate_review",
+  "revision": null,
+  "progress": {"stage_number": 1, "stage_total": 3, "step_number": 2, "step_total": 5, "label": "Odak seçimi"},
+  "next_card": {
+    "id": "schema-card-prepath-11111111111111111111111111111111",
+    "kind": "candidate_prompt",
+    "presentation": "chat_only",
+    "status": "active",
+    "path_id": null,
+    "path_public_id": null,
+    "stage": "listen",
+    "step": "candidate_review",
+    "revision": null,
+    "title": "",
+    "context_line": "Terk Edilme / İstikrarsızlık tetiklenmiş olabilir.",
+    "body": "Bunu çalışmak ister misin?",
+    "candidate": {
+      "public_id": "11111111111111111111111111111111",
+      "schema_code": "schema_abandonment",
+      "schema_label": "Terk Edilme / İstikrarsızlık",
+      "mode_code": "",
+      "mode_label": ""
+    },
+    "source": {
+      "user_message_id": 101,
+      "user_message_public_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "assistant_message_id": 102,
+      "assistant_message_public_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "quote": "Böyle olunca geri çekiliyorum."
+    },
+    "fields": [],
+    "actions": [
+      {
+        "id": "candidate-yes",
+        "action": "accept_candidate_chat",
+        "label": "Evet",
+        "style": "primary",
+        "requires_confirm": false,
+        "payload": {
+          "claim_id": 71,
+          "candidate_public_id": "11111111111111111111111111111111",
+          "source_user_message_id": 101,
+          "source_user_message_public_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source_assistant_message_id": 102,
+          "source_assistant_message_public_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      {
+        "id": "candidate-no",
+        "action": "reject_candidate_chat",
+        "label": "Hayır",
+        "style": "secondary",
+        "requires_confirm": false,
+        "payload": {
+          "claim_id": 71,
+          "candidate_public_id": "11111111111111111111111111111111",
+          "source_user_message_id": 101,
+          "source_user_message_public_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source_assistant_message_id": 102,
+          "source_assistant_message_public_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "progress": {"stage_number": 1, "stage_total": 3, "step_number": 2, "step_total": 5, "label": "Odak seçimi"}
+  },
+  "interaction_policy": {
+    "requires_in_app": true,
+    "remote_reply_allowed": false,
+    "composer_allowed": false,
+    "composer_mode": "disabled",
+    "composer_surface": "ordinary_chat",
+    "composer_binding_required": false,
+    "bound_step_id": "",
+    "inline_controls_only": false,
+    "reason": "focus_decision"
+  },
+  "resume_state": {"required": false, "reason": "none", "stage": "listen", "step": "candidate_review", "card_id": "schema-card-prepath-11111111111111111111111111111111"},
+  "clinical_sync": {
+    "enabled": true,
+    "preference_enabled": true,
+    "initialized": true,
+    "generation": 2,
+    "pending_device_confirmation": false,
+    "can_enable": true,
+    "reason": "enabled",
+    "notice": "Onaylanmış Şema çalışma yolu güvenli ortak projeksiyonla eşitlenir; özel soru planları ve klinik ledgers cihazda kalır."
+  },
+  "active_path": null,
+  "message_meta": [],
+  "contract": {
+    "runtime": {
+      "protocol": "schema_path_chat_v5",
+      "schema_version": 5,
+      "path_flow_version": 5,
+      "presentation": "chat_only",
+      "sync_batch_version": 8,
+      "fixture_version": 8
+    },
+    "request_id": {
+      "owner": "client",
+      "endpoint_patterns": {
+        "/api/schema-path": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{11,99}$",
+        "/api/chat": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{11,127}$"
+      },
+      "idempotency": "Aynı gövde ve request_id kaydedilmiş sonucu döndürür; farklı gövde veya bağ 409 döndürür."
+    },
+    "candidate_prompt": {
+      "sole_visible_schema_ui": true,
+      "exact_body": "Bunu çalışmak ister misin?",
+      "context_line_field": "context_line",
+      "protocol": "schema_path_chat_v5",
+      "version": 5,
+      "accept_is_single_start_intent": true,
+      "accept_persists_visible_user_yes": true,
+      "reject_atomically_offers_next_or_returns_listen": true,
+      "visible_actions": ["accept_candidate_chat", "reject_candidate_chat"]
+    },
+    "post_yes_messages": {
+      "question_authority": "Every clinical question is one validated provider-authored durable assistant message row.",
+      "visible_suffix_or_continuation": false,
+      "synthetic_assistant_message": false,
+      "card_body_is_always_empty": true,
+      "card_fields_are_always_empty": true,
+      "card_actions_are_always_empty": true,
+      "binding_source_assistant": "The exact completed durable assistant question row; never a latest-bubble fallback.",
+      "provider_failure": "No assistant message, checkpoint, binding or UI question is created.",
+      "process_death": "Public chat_request exposes schema_prompt_protocol and schema_prompt_intent but never hidden plan/result JSON."
+    },
+    "reachable_flow": {
+      "stages": ["listen", "explore", "origin", "work", "integrate", "complete"],
+      "steps": ["listen", "candidate_review", "variable_explore", "origin_sequence", "imagery_work", "mode_dialogue", "reparent_or_chair_work", "grounding_review", "healthy_adult_voice", "age_ladder", "environment_rescript", "present_transfer", "optional_practice", "followup", "complete"],
+      "removed_from_v5": ["current_impact", "variable_check", "focus_confirm", "method_select", "method_confirm", "imagery_precheck", "reparent_or_chair_precheck"],
+      "variable_exploration": "At most four append-only trials. Each real Kerem question changes exactly one server-planned hypothetical variable and never states it as fact.",
+      "origin_prompt_keys": ["age", "place", "what", "how", "need"],
+      "no_rating_or_precheck_question": true
+    },
+    "prompt_intents": ["variable_scenario", "variable_counterfactual", "variable_response_clarify", "variable_limit_close", "method_explain_origin_age", "origin_age", "origin_place", "origin_event_response", "origin_unmet_need", "imagery_stage", "chair_stage", "grounding", "healthy_adult_voice", "age_ladder", "environment_rescript", "present_transfer", "optional_practice", "followup", "complete"],
+    "method_flow": {
+      "selection_authority": "deterministic_server_rule_after_grounded_variable_effect",
+      "new_v5_method_ids": ["young:method:imagery-rescripting", "young:method:chair-dialogue"],
+      "method_explanation_is_declarative": true,
+      "user_method_approval_question": false,
+      "method_selected_before_session": true,
+      "one_selected_branch_only": true,
+      "limited_reparenting": "Historical flow-v4 recovery only; never auto-selected for a new v5 path."
+    },
+    "checkpoint": {
+      "public_id_pattern": "^[0-9a-f]{32}$",
+      "seq_type": "integer >= 0; locally appended rows increase monotonically",
+      "status_values": ["active", "completed", "clarification", "paused", "backtracked", "invalidated"],
+      "transition_kind_values": ["start", "advance", "clarify", "backtrack", "resume", "import"],
+      "append_only": true,
+      "candidate_checkpoint": "omitted",
+      "pending_target_public_id": "32 lowercase hex only when backtrack_pending is true; otherwise null",
+      "hidden_binding": "Every bound chat_state repeats checkpoint public_id and seq."
+    },
+    "prompt_delivery": {
+      "total_keys": ["request_id", "status", "prompt_assistant_message_id", "prompt_assistant_message_public_id", "error_code"],
+      "status_values": ["missing", "queued", "running", "waiting_provider", "completed", "failed", "interrupted", "cancelled", "imported_waiting"],
+      "completed_identity": "request_id string; assistant local id integer and public id 32 lowercase hex",
+      "noncompleted_identity": "assistant ids are null",
+      "imported_waiting_identity": "request_id and both prompt assistant ids are null; error_code is null"
+    },
+    "card": {
+      "kind_values": ["candidate_prompt", "chat_state"],
+      "post_yes_status_values": ["active", "paused", "completed"],
+      "visible_path_action_values": ["accept_candidate_chat", "reject_candidate_chat"],
+      "post_yes_visible_action_values": [],
+      "post_yes_visible_text_fields": {"title": "", "context_line": "", "body": ""}
+    },
+    "interaction_policy": {
+      "composer_surface": "ordinary_chat",
+      "completed_prompt": "bound and enabled only with exact durable assistant/checkpoint identity",
+      "pending_or_failed_prompt": "disabled",
+      "imported_waiting": "bound and enabled only for the exact content-free sync import control binding",
+      "complete": "ordinary",
+      "remote_reply": "false for every incomplete path; true only after complete",
+      "requires_in_app": "true for every incomplete path"
+    },
+    "controls": {
+      "visible_controls_after_yes": [],
+      "exact_commands": {
+        "pause": ["dur", "duraklat", "şimdi dur"],
+        "stop": ["bitir", "bitirelim", "çalışmayı bitir", "bu çalışmayı bırak"],
+        "back": ["geri dön", "önceki adıma dön", "bir adım geri"],
+        "ground": ["şimdiye dön", "topraklan"],
+        "resume": ["devam", "devam et", "devam edelim", "sürdür"]
+      },
+      "provider_zero": ["pause", "stop", "back", "ground"],
+      "resume_delivery": "Devam schedules exactly one real provider-authored durable assistant question after all safety/source/sync gates.",
+      "synthetic_acknowledgement": false,
+      "contextual_word_is_not_command": true
+    },
+    "sync_import": {
+      "delivery_status": "imported_waiting",
+      "dashboard_get_provider_calls": 0,
+      "dashboard_get_message_job_request_delta": [0, 0, 0],
+      "checkpoint_status": "paused",
+      "checkpoint_transition_kind": "import",
+      "can_backtrack": false,
+      "binding_discriminator": "sync_import_control=true",
+      "ordinary_clinical_text": "409 before message/job/provider",
+      "devam": "creates one genuine user row and one durable provider request; retry is idempotent",
+      "private_session_missing": "safe variable restart boundary; never fabricate a technique session"
+    },
+    "legacy_v4_retirement": {
+      "new_interactive_v4_prompt": false,
+      "preintegration_without_run": "append-only paused v5 variable restart boundary",
+      "integration": "same safe integration step with local import boundary; no technique repetition",
+      "validated_active_run": "pause and ground first; only an explicit now-here response closes the legacy run and enters integration",
+      "invalid_source_or_safety": "paused nonbinding fail-closed",
+      "visible_body_or_actions": false
+    },
+    "completed_turn_lineage": {
+      "column": "messages.turn_pair_public_id",
+      "pattern": "^[0-9a-f]{32}$",
+      "derivation": "lowercase hex sha256('divan-schema-v4\\0' + compact JSON array ['completed-turn', durable request_id]), first 32 chars",
+      "wire": "Opaque pair identity is carried with immutable ordinary messages; chat_requests, provider and model state remain device-local.",
+      "authority": "Exact user and assistant messages share one nonempty canonical pair id, one role each, completed delivery, live sync identities and no historical safety event.",
+      "ordering": "Local row ids and batch order are not chronology."
+    },
+    "public_chat_request": {
+      "additive_fields": ["schema_prompt_protocol", "schema_prompt_intent", "schema_binding_result"],
+      "forbidden_fields": ["schema_prompt_plan_json", "schema_prompt_result_json", "schema_binding_json"]
+    },
+    "notifications": {
+      "requires_in_app_until_complete": true,
+      "remote_reply_allowed_until_complete": false,
+      "schema_prompt_text_in_notification": false
+    }
+  },
+  "card_examples": {
+    "candidate_prompt": {
+      "id": "schema-card-prepath-11111111111111111111111111111111",
+      "kind": "candidate_prompt",
+      "presentation": "chat_only",
+      "status": "active",
+      "path_id": null,
+      "path_public_id": null,
+      "stage": "listen",
+      "step": "candidate_review",
+      "revision": null,
+      "title": "",
+      "context_line": "Terk Edilme / İstikrarsızlık tetiklenmiş olabilir.",
+      "body": "Bunu çalışmak ister misin?",
+      "candidate": {"public_id": "11111111111111111111111111111111", "schema_code": "schema_abandonment", "schema_label": "Terk Edilme / İstikrarsızlık", "mode_code": "", "mode_label": ""},
+      "source": {"user_message_id": 101, "user_message_public_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "assistant_message_id": 102, "assistant_message_public_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "quote": "Böyle olunca geri çekiliyorum."},
+      "fields": [],
+      "actions": [
+        {"id": "candidate-yes", "action": "accept_candidate_chat", "label": "Evet", "style": "primary", "requires_confirm": false, "payload": {"claim_id": 71, "candidate_public_id": "11111111111111111111111111111111", "source_user_message_id": 101, "source_user_message_public_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source_assistant_message_id": 102, "source_assistant_message_public_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+        {"id": "candidate-no", "action": "reject_candidate_chat", "label": "Hayır", "style": "secondary", "requires_confirm": false, "payload": {"claim_id": 71, "candidate_public_id": "11111111111111111111111111111111", "source_user_message_id": 101, "source_user_message_public_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source_assistant_message_id": 102, "source_assistant_message_public_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}
+      ],
+      "progress": {"stage_number": 1, "stage_total": 3, "step_number": 2, "step_total": 5, "label": "Odak seçimi"}
+    },
+    "queued_chat_state": {
+      "id": "schema-chat-v5-55555555555555555555555555555555-r3",
+      "kind": "chat_state", "presentation": "chat_only", "status": "active",
+      "path_id": 91, "path_public_id": "55555555555555555555555555555555",
+      "stage": "explore", "step": "variable_explore", "revision": 3,
+      "title": "", "context_line": "", "body": "", "fields": [], "actions": [],
+      "checkpoint": null,
+      "prompt_delivery": {"request_id": "schema-v5-prompt-0001", "status": "queued", "prompt_assistant_message_id": null, "prompt_assistant_message_public_id": null, "error_code": null},
+      "source": {}, "chat_binding": null
+    },
+    "completed_chat_state": {
+      "id": "schema-chat-v5-55555555555555555555555555555555-r4",
+      "kind": "chat_state", "presentation": "chat_only", "status": "active",
+      "path_id": 91, "path_public_id": "55555555555555555555555555555555",
+      "stage": "explore", "step": "variable_explore", "revision": 4,
+      "title": "", "context_line": "", "body": "", "fields": [], "actions": [],
+      "checkpoint": {"public_id": "66666666666666666666666666666666", "seq": 4, "prompt_key": "scenario", "method_id": null, "status": "active", "can_backtrack": false, "backtrack_pending": false, "pending_target_public_id": null},
+      "prompt_delivery": {"request_id": "schema-v5-prompt-0001", "status": "completed", "prompt_assistant_message_id": 204, "prompt_assistant_message_public_id": "dddddddddddddddddddddddddddddddd", "error_code": null},
+      "source": {"user_message_id": 203, "user_message_public_id": "cccccccccccccccccccccccccccccccc", "assistant_message_id": 204, "assistant_message_public_id": "dddddddddddddddddddddddddddddddd", "quote": "Evet"},
+      "chat_binding": {
+        "protocol": "schema_path_chat_v5", "path_id": 91, "path_public_id": "55555555555555555555555555555555",
+        "step_id": "variable_explore", "expected_revision": 4,
+        "checkpoint_public_id": "66666666666666666666666666666666", "expected_checkpoint_seq": 4,
+        "prompt_request_id": "schema-v5-prompt-0001", "prompt_assistant_message_id": 204,
+        "prompt_assistant_message_public_id": "dddddddddddddddddddddddddddddddd",
+        "source_user_message_id": 203, "source_user_message_public_id": "cccccccccccccccccccccccccccccccc",
+        "source_assistant_message_id": 204, "source_assistant_message_public_id": "dddddddddddddddddddddddddddddddd"
+      }
+    },
+    "failed_chat_state": {
+      "id": "schema-chat-v5-55555555555555555555555555555555-r3",
+      "kind": "chat_state", "presentation": "chat_only", "status": "active",
+      "path_id": 91, "path_public_id": "55555555555555555555555555555555",
+      "stage": "explore", "step": "variable_explore", "revision": 3,
+      "title": "", "context_line": "", "body": "", "fields": [], "actions": [],
+      "checkpoint": null,
+      "prompt_delivery": {"request_id": "schema-v5-prompt-0001", "status": "failed", "prompt_assistant_message_id": null, "prompt_assistant_message_public_id": null, "error_code": "provider_unavailable"},
+      "source": {}, "chat_binding": null
+    },
+    "imported_waiting_chat_state": {
+      "id": "schema-chat-v5-55555555555555555555555555555555-r41",
+      "kind": "chat_state", "presentation": "chat_only", "status": "paused",
+      "path_id": 91, "path_public_id": "55555555555555555555555555555555",
+      "stage": "explore", "step": "variable_explore", "revision": 41,
+      "title": "", "context_line": "", "body": "", "fields": [], "actions": [],
+      "checkpoint": {"public_id": "77777777777777777777777777777777", "seq": 1, "prompt_key": "scenario", "method_id": null, "status": "paused", "can_backtrack": false, "backtrack_pending": false, "pending_target_public_id": null},
+      "prompt_delivery": {"request_id": null, "status": "imported_waiting", "prompt_assistant_message_id": null, "prompt_assistant_message_public_id": null, "error_code": null},
+      "source": {"user_message_id": 301, "user_message_public_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "assistant_message_id": 302, "assistant_message_public_id": "ffffffffffffffffffffffffffffffff", "quote": ""},
+      "chat_binding": {
+        "protocol": "schema_path_chat_v5", "sync_import_control": true,
+        "path_id": 91, "path_public_id": "55555555555555555555555555555555",
+        "step_id": "variable_explore", "expected_revision": 41,
+        "checkpoint_public_id": "77777777777777777777777777777777", "expected_checkpoint_seq": 1,
+        "prompt_request_id": null, "prompt_assistant_message_id": null, "prompt_assistant_message_public_id": null,
+        "source_user_message_id": 301, "source_user_message_public_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "source_assistant_message_id": 302, "source_assistant_message_public_id": "ffffffffffffffffffffffffffffffff"
+      }
+    },
+    "complete_chat_state": {
+      "id": "schema-chat-v5-55555555555555555555555555555555-r28",
+      "kind": "chat_state", "presentation": "chat_only", "status": "completed",
+      "path_id": 91, "path_public_id": "55555555555555555555555555555555",
+      "stage": "complete", "step": "complete", "revision": 28,
+      "title": "", "context_line": "", "body": "", "fields": [], "actions": [],
+      "checkpoint": {"public_id": "99999999999999999999999999999999", "seq": 28, "prompt_key": "closed", "method_id": "young:method:imagery-rescripting", "status": "completed", "can_backtrack": true, "backtrack_pending": false, "pending_target_public_id": null},
+      "prompt_delivery": {"request_id": "schema-v5-prompt-0028", "status": "completed", "prompt_assistant_message_id": 404, "prompt_assistant_message_public_id": "abababababababababababababababab", "error_code": null},
+      "source": {}, "chat_binding": null
+    }
+  },
+  "chat_schema_binding": {
+    "protocol": "schema_path_chat_v5", "path_id": 91, "path_public_id": "55555555555555555555555555555555",
+    "step_id": "variable_explore", "expected_revision": 4,
+    "checkpoint_public_id": "66666666666666666666666666666666", "expected_checkpoint_seq": 4,
+    "prompt_request_id": "schema-v5-prompt-0001", "prompt_assistant_message_id": 204,
+    "prompt_assistant_message_public_id": "dddddddddddddddddddddddddddddddd",
+    "source_user_message_id": 203, "source_user_message_public_id": "cccccccccccccccccccccccccccccccc",
+    "source_assistant_message_id": 204, "source_assistant_message_public_id": "dddddddddddddddddddddddddddddddd"
+  },
+  "import_control_binding": {
+    "protocol": "schema_path_chat_v5", "sync_import_control": true,
+    "path_id": 91, "path_public_id": "55555555555555555555555555555555",
+    "step_id": "variable_explore", "expected_revision": 41,
+    "checkpoint_public_id": "77777777777777777777777777777777", "expected_checkpoint_seq": 1,
+    "prompt_request_id": null, "prompt_assistant_message_id": null, "prompt_assistant_message_public_id": null,
+    "source_user_message_id": 301, "source_user_message_public_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "source_assistant_message_id": 302, "source_assistant_message_public_id": "ffffffffffffffffffffffffffffffff"
+  },
+  "chat_post": {
+    "endpoint": "/api/chat",
+    "body": {"conv_id": 7, "message": "Kısa doğal kullanıcı yanıtı", "request_id": "chat-schema-v5-0001", "schema_binding": "<chat_schema_binding>"},
+    "forbidden_fields": ["schema_binding.step_data", "schema_prompt_plan_json", "schema_prompt_result_json"],
+    "rule": "A non-command answer requires the exact completed durable Kerem prompt binding before any user row, job or provider call."
+  },
+  "schema_binding_results": {
+    "success": {"applied": true, "progressed": true, "followup_required": true, "error_code": null, "missing": ["hypothetical_response"], "path_id": 91, "path_revision": 5, "revision": 5, "stage": "explore", "step": "variable_explore", "action": "ask_counterfactual", "checkpoint_public_id": "88888888888888888888888888888888", "checkpoint_seq": 5, "prompt_request_id": "chat-schema-v5-0001", "backtracked": false},
+    "terminal": {"applied": true, "progressed": true, "followup_required": false, "error_code": null, "missing": [], "path_id": 91, "path_revision": 28, "revision": 28, "stage": "complete", "step": "complete", "action": "complete_schema_path", "checkpoint_public_id": "99999999999999999999999999999999", "checkpoint_seq": 28, "prompt_request_id": "chat-schema-v5-0028", "backtracked": false},
+    "source_invalid": {"applied": false, "progressed": false, "followup_required": false, "error_code": "schema_source_invalid", "missing": [], "path_id": 91, "path_revision": 4, "revision": 4, "stage": "explore", "step": "variable_explore", "action": null, "checkpoint_public_id": "66666666666666666666666666666666", "checkpoint_seq": 4, "prompt_request_id": null, "backtracked": false},
+    "stale": {"applied": false, "progressed": false, "followup_required": false, "error_code": "schema_chat_binding_stale", "missing": [], "path_id": 91, "path_revision": 5, "revision": 5, "stage": "explore", "step": "variable_explore", "action": null, "checkpoint_public_id": "88888888888888888888888888888888", "checkpoint_seq": 5, "prompt_request_id": null, "backtracked": false},
+    "total_keys": ["applied", "progressed", "followup_required", "error_code", "missing", "path_id", "path_revision", "revision", "stage", "step", "action", "checkpoint_public_id", "checkpoint_seq", "prompt_request_id", "backtracked"]
+  },
+  "action_requests": {
+    "accept_candidate_chat": {"endpoint": "/api/schema-path", "request_id": "schema-v5-candidate-yes-0001", "action": "accept_candidate_chat", "payload": "<candidate yes payload>"},
+    "reject_candidate_chat": {"endpoint": "/api/schema-path", "request_id": "schema-v5-candidate-no-0001", "action": "reject_candidate_chat", "payload": "<candidate no payload>"},
+    "exact_pause_chat": {"endpoint": "/api/chat", "message": "Dur", "schema_binding": "<chat_schema_binding>", "provider_calls": 0, "assistant_messages": 0},
+    "exact_stop_chat": {"endpoint": "/api/chat", "message": "Bitir", "schema_binding": "<chat_schema_binding>", "provider_calls": 0, "assistant_messages": 0},
+    "exact_back_chat": {"endpoint": "/api/chat", "message": "Geri dön", "schema_binding": "<chat_schema_binding>", "provider_calls": 0, "assistant_messages": 0},
+    "exact_ground_chat": {"endpoint": "/api/chat", "message": "Şimdiye dön", "schema_binding": "<chat_schema_binding>", "provider_calls": 0, "assistant_messages": 0},
+    "exact_import_resume_chat": {"endpoint": "/api/chat", "message": "Devam", "schema_binding": "<import_control_binding>", "provider_calls_after_worker": 1, "durable_assistant_messages_after_worker": 1}
+  },
+  "errors": ["schema_chat_binding_required", "schema_chat_binding_stale", "schema_chat_only_step_data", "schema_checkpoint_stale", "schema_source_invalid", "schema_safety_pause", "schema_sync_conflict", "schema_provider_reconfirm", "schema_step_mismatch", "schema_card_inactive", "schema_backtrack_unavailable", "schema_backtrack_source_invalid", "schema_prompt_missing", "schema_prompt_invalid", "schema_prompt_stale", "schema_prompt_shape_invalid", "schema_prompt_intent_mismatch", "schema_prompt_grounding_invalid", "schema_prompt_disallowed_content", "schema_prompt_delivery_stale", "schema_variable_limit", "schema_protocol_update_required", "schema_v4_action_required", "clinical_sync_confirmation_required", "clinical_sync_unavailable", "sync_protocol_update_required", "notification_reply_requires_app"],
+  "sync_wire": {
+    "batch_version": 8,
+    "capability_gate": {
+      "protocol_version": 8,
+      "ordered_capabilities": ["schema_checkpoint_v1", "schema_path_chat_v5"],
+      "v7_network_peer": "rejected before snapshot, database read or secret use",
+      "historical_flow4_records": "readable and re-exportable inside an authenticated v8 batch"
+    },
+    "method_node_id_values_by_flow": {
+      "4": ["", "young:method:imagery-rescripting", "young:method:chair-dialogue", "young:method:limited-reparenting"],
+      "5": ["", "young:method:imagery-rescripting", "young:method:chair-dialogue"]
+    },
+    "ordinary_message_lineage": {
+      "record_type": "message",
+      "safe_columns": ["public_id", "role", "content", "created", "turn_pair_public_id", "conversation_public_id", "reply_to_public_id"],
+      "turn_pair_public_id_type": "empty legacy value or exactly 32 lowercase hex",
+      "sender_attestation": "Only a local durable completed chat_request originates a canonical pair id; v8 accepts it only over authenticated paired transport with schema_path_chat_v5 capability.",
+      "legacy_queue_migration": "Historical queued message payloads are normalized without changing cursor, event identity, revision, ancestry or timestamps.",
+      "legacy_receiver_upgrade": "One authenticated direct causal empty-to-canonical child is accepted; nonempty change, clear and duplicate pair-role bindings are rejected."
+    },
+    "safe_tables_and_columns": {
+      "schema_paths": ["public_id", "therapist", "path_sequence", "phase", "status", "clinical_generation", "flow_version", "stage", "step", "pause_reason", "resume_required", "focus_candidate_public_id", "focus_schema_key", "focus_mode_key", "focus_label", "focus_evidence", "focus_source_user_public_id", "focus_source_assistant_public_id", "method_node_id", "practice_status", "revision", "created", "updated", "closed_at", "conversation_public_id"],
+      "schema_candidate_queue": ["public_id", "schema_key", "mode_key", "evidence", "burden", "impact", "clinical_generation", "priority", "status", "sort_order", "revision", "created", "updated", "conversation_public_id", "path_public_id", "source_user_message_public_id", "source_assistant_message_public_id"],
+      "schema_focus_checks": ["public_id", "baseline_burden", "variable_text", "changed_scenario", "changed_burden", "fit", "confirmed", "authored_by", "revision", "created", "updated", "conversation_public_id", "path_public_id", "candidate_public_id", "source_user_message_public_id", "source_assistant_message_public_id"],
+      "schema_path_steps": ["public_id", "stage", "step", "status", "revision", "created", "updated", "completed_at", "skipped_at", "invalidated_at", "conversation_public_id", "path_public_id", "source_user_message_public_id", "source_assistant_message_public_id"],
+      "schema_origin": ["public_id", "mode_key", "age_reported", "age_range", "scene", "unmet_need", "confidence", "authored_by", "status", "created", "updated", "conversation_public_id", "path_public_id", "source_user_message_public_id", "source_assistant_message_public_id"],
+      "schema_growth": ["public_id", "mode_key", "stage_age", "stage_label", "then_response", "now_response", "difference", "environment_before", "environment_rescripted", "healthy_adult_words", "seq", "status", "environment_status", "created", "updated", "conversation_public_id", "path_public_id", "source_user_message_public_id", "source_assistant_message_public_id", "environment_source_user_message_public_id", "environment_source_assistant_message_public_id"],
+      "healthy_adult_marks": ["public_id", "source", "evidence", "status", "created", "invalidated_at", "conversation_public_id", "path_public_id", "source_message_public_id", "source_assistant_message_public_id"],
+      "schema_transfer_records": ["public_id", "trigger_text", "healthy_adult_response", "planned_action", "support_choice", "predicted_result", "observed_result", "authored_by", "status", "created", "updated", "conversation_public_id", "path_public_id", "source_user_message_public_id", "source_assistant_message_public_id", "trigger_source_user_message_public_id", "trigger_source_assistant_message_public_id"],
+      "message_meta_events": ["public_id", "event_key", "clinical_generation", "step", "kind", "status", "title", "summary", "artifact_type", "artifact_public_id", "created", "updated", "invalidated_at", "conversation_public_id", "message_public_id", "source_user_message_public_id", "source_assistant_message_public_id", "path_public_id"]
+    },
+    "local_only": [
+      "schema_path_checkpoints and schema_path_method_choices are append-only local authority tables",
+      "schema_variable_trials and schema_origin_answers are local-only exact-provenance ledgers",
+      "schema_v5_technique_sessions and schema_v5_technique_turns are local-only experiential ledgers",
+      "schema_v5_integration_answers is a local-only exact-provenance ledger",
+      "chat_requests, jobs, request_id, provider/model delivery, schema_prompt_plan_json and schema_prompt_result_json are local-only",
+      "schema_path_techniques, technique_runs, technique_checkpoints, imagery_runs, imagery_steps, chair_runs, chair_participants, chair_turns and precheck data are local-only",
+      "raw psych observations, claims and evidence are local-only",
+      "schema_path_events, schema_clinical_sync_events and schema_path_sync_conflicts are local-only",
+      "messages.turn_pair_public_id is wire-safe; method_node_id is wire-safe only under the exact flow-version allowlist"
+    ],
+    "consent": {
+      "wire_preference": "session_meta.schema_clinical_sync_enabled",
+      "wire_generation": "session_meta.schema_clinical_sync_generation",
+      "local_confirmation": "session_meta.schema_clinical_sync_initialized",
+      "withdrawal": "Withdrawn clinical rows become payload-free tombstones and cannot revive without a new generation and explicit local confirmation."
+    }
+  }
+}

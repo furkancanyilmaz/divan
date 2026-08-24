@@ -33,6 +33,20 @@ from typing import Any, Callable, Dict, Optional
 
 
 PROTOCOL_VERSION = 1
+# Wire v8 is an exact capability boundary.  A v7 peer understands the legacy
+# checkpoint projection but cannot validate or resume Schema Path v5 stages,
+# so it must fail before a pairing secret is consumed or local state is read.
+SYNC_PROTOCOL_VERSION = 8
+SYNC_CAPABILITY = "schema_checkpoint_v1"
+SCHEMA_PATH_V5_SYNC_CAPABILITY = "schema_path_chat_v5"
+SYNC_CAPABILITIES = (
+    SYNC_CAPABILITY,
+    SCHEMA_PATH_V5_SYNC_CAPABILITY,
+)
+SYNC_PROTOCOL_ERROR_CODE = "sync_protocol_update_required"
+SYNC_PROTOCOL_ERROR_COPY = (
+    "Her iki cihazdaki Divan’ı güncelleyin; sonra yeni QR oluşturun."
+)
 DEFAULT_TTL_SECONDS = 5 * 60
 MAX_TTL_SECONDS = 5 * 60
 MAX_REQUEST_BYTES = 512 * 1024
@@ -61,10 +75,29 @@ class CertificatePinError(SecureSyncError):
     """The listener certificate does not match the out-of-band invitation."""
 
 
+class SyncProtocolMismatchError(SecureSyncError):
+    """The peer cannot safely understand this sync data model."""
+
+    code = SYNC_PROTOCOL_ERROR_CODE
+
+
 class TransportInputError(Exception):
-    def __init__(self, message: str, status: int = 400):
+    def __init__(
+            self, message: str, status: int = 400,
+            code: Optional[str] = None):
         super().__init__(message)
         self.status = status
+        self.code = code
+
+
+def validate_sync_protocol(
+        protocol_version: Any, capabilities: Any) -> None:
+    """Require the exact v8 capability tuple before pairing or local I/O."""
+    if (type(protocol_version) is not int
+            or protocol_version != SYNC_PROTOCOL_VERSION
+            or not isinstance(capabilities, (list, tuple))
+            or tuple(capabilities) != SYNC_CAPABILITIES):
+        raise SyncProtocolMismatchError(SYNC_PROTOCOL_ERROR_COPY)
 
 
 def _b64url_encode(value: bytes) -> str:
@@ -252,6 +285,8 @@ class PeerIdentity:
     name: str
     platform: str
     address: str
+    protocol_version: int = SYNC_PROTOCOL_VERSION
+    capabilities: tuple[str, ...] = SYNC_CAPABILITIES
 
 
 class _WindowRateLimiter:
@@ -507,13 +542,25 @@ def pinned_json_post(
 
 
 def _validated_invitation_payload(payload: Any) -> Dict[str, Any]:
-    expected = {
+    legacy_expected = {
         "v", "scheme", "host", "port", "session_id",
         "pairing_secret", "cert_sha256", "desktop_device_id",
         "expires_at", "path",
     }
-    if not isinstance(payload, dict) or set(payload) != expected:
+    expected = legacy_expected | {"protocol_version", "capabilities"}
+    if not isinstance(payload, dict):
         raise ValueError("invitation fields are invalid")
+    supplied = set(payload)
+    if supplied == legacy_expected:
+        raise SyncProtocolMismatchError(SYNC_PROTOCOL_ERROR_COPY)
+    if supplied != expected:
+        if (supplied <= expected and
+                ("protocol_version" not in supplied or
+                 "capabilities" not in supplied)):
+            raise SyncProtocolMismatchError(SYNC_PROTOCOL_ERROR_COPY)
+        raise ValueError("invitation fields are invalid")
+    validate_sync_protocol(
+        payload["protocol_version"], payload["capabilities"])
     if payload["v"] != 1 or payload["scheme"] != "https":
         raise ValueError("invitation protocol is unsupported")
     host = _safe_host(payload["host"])
@@ -621,6 +668,8 @@ class PinnedSyncClient:
             message = response.get("error")
             if not isinstance(message, str) or len(message) > 160:
                 message = "Eşitleme isteği reddedildi."
+            if response.get("error_code") == SYNC_PROTOCOL_ERROR_CODE:
+                raise SyncProtocolMismatchError(SYNC_PROTOCOL_ERROR_COPY)
             raise SecureSyncError(message)
         return response
 
@@ -634,6 +683,8 @@ class PinnedSyncClient:
         response = self._post("/pair", {
             "session_id": self._invitation["session_id"],
             "pairing_secret": self._invitation["pairing_secret"],
+            "protocol_version": SYNC_PROTOCOL_VERSION,
+            "capabilities": list(SYNC_CAPABILITIES),
             "device": {
                 "id": device_id,
                 "public_key": _b64url_encode(public_key),
@@ -643,6 +694,8 @@ class PinnedSyncClient:
             "request_id": _b64url_encode(secrets.token_bytes(18)),
             "seq": 0,
         })
+        validate_sync_protocol(
+            response.get("protocol_version"), response.get("capabilities"))
         token = response.get("session_token")
         if (not isinstance(token, str) or
                 len(_b64url_decode(token, maximum=32)) != 32):
@@ -712,6 +765,8 @@ class PinnedSyncClient:
 
     def close(self) -> None:
         self._session_token = None
+        if self._invitation.get("pairing_secret") != "<consumed>":
+            self._invitation["pairing_secret"] = "<discarded>"
 
 
 def pair_with_invitation(
@@ -719,9 +774,13 @@ def pair_with_invitation(
         name: str, platform: str, timeout: float = 8.0
         ) -> tuple[PinnedSyncClient, Dict[str, Any]]:
     client = PinnedSyncClient(invitation, timeout=timeout)
-    response = client.pair(
-        device_id=device_id, public_key=public_key,
-        name=name, platform=platform)
+    try:
+        response = client.pair(
+            device_id=device_id, public_key=public_key,
+            name=name, platform=platform)
+    except Exception:
+        client.close()
+        raise
     return client, response
 
 
@@ -795,8 +854,13 @@ class _SecureSyncHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _error(self, message: str, status: int):
-        self._json({"error": message}, status)
+    def _error(
+            self, message: str, status: int,
+            error_code: Optional[str] = None):
+        payload = {"error": message}
+        if error_code:
+            payload["error_code"] = error_code
+        self._json(payload, status)
 
     def _read_json(self) -> Dict[str, Any]:
         content_type = (
@@ -869,7 +933,7 @@ class _SecureSyncHandler(BaseHTTPRequestHandler):
             else:
                 self._error("bulunamadı", 404)
         except TransportInputError as error:
-            self._error(str(error), error.status)
+            self._error(str(error), error.status, error.code)
         except Exception:
             # Callback and TLS internals must never disclose details or payloads.
             self._error("eşitleme isteği işlenemedi", 500)
@@ -990,6 +1054,8 @@ class SecureSyncSession:
                 raise SecureSyncError("eşleme daveti kullanıldı")
             payload = {
                 "v": PROTOCOL_VERSION,
+                "protocol_version": SYNC_PROTOCOL_VERSION,
+                "capabilities": list(SYNC_CAPABILITIES),
                 "scheme": "https",
                 "host": self.advertised_host,
                 "port": self._port,
@@ -1008,12 +1074,25 @@ class SecureSyncSession:
             return PairingInvitation(payload, manual, uri)
 
     def _pair(self, value: Dict[str, Any], address: str) -> Dict[str, Any]:
-        expected = {
+        legacy_expected = {
             "session_id", "pairing_secret", "device",
             "request_id", "seq",
         }
-        if set(value) != expected:
+        expected = legacy_expected | {"protocol_version", "capabilities"}
+        supplied = set(value)
+        if (supplied <= expected and
+                ("protocol_version" not in supplied or
+                 "capabilities" not in supplied)):
+            raise TransportInputError(
+                SYNC_PROTOCOL_ERROR_COPY, 409, SYNC_PROTOCOL_ERROR_CODE)
+        if supplied != expected:
             raise TransportInputError("eşleme isteği alanları geçersiz")
+        try:
+            validate_sync_protocol(
+                value.get("protocol_version"), value.get("capabilities"))
+        except SyncProtocolMismatchError:
+            raise TransportInputError(
+                SYNC_PROTOCOL_ERROR_COPY, 409, SYNC_PROTOCOL_ERROR_CODE)
         if value.get("seq") != 0:
             raise TransportInputError("eşleme sırası geçersiz", 409)
         request_id = value.get("request_id")
@@ -1065,6 +1144,8 @@ class SecureSyncSession:
                 name=name.strip(),
                 platform=platform.strip(),
                 address=address,
+                protocol_version=value["protocol_version"],
+                capabilities=tuple(value["capabilities"]),
             )
             self._request_ids.add(request_id)
             for index in range(len(self._pairing_secret)):
@@ -1074,6 +1155,8 @@ class SecureSyncSession:
                 token.encode("ascii")).digest()
         return {
             "ok": True,
+            "protocol_version": SYNC_PROTOCOL_VERSION,
+            "capabilities": list(SYNC_CAPABILITIES),
             "peer_id": self.desktop_device_id,
             "device_fingerprint": fingerprint,
             "session_token": token,

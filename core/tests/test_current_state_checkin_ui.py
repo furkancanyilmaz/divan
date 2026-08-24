@@ -86,20 +86,17 @@ class CurrentStateCheckinUISourceTests(unittest.TestCase):
         self.assertIn(
             "height:var(--mobile-vvh,100dvh)", self.html)
         self.assertIn(
-            "#mobileHome.selecting #mobileHomeStateBtn{display:none}",
+            "#mobileHome.selecting #mobileHomeMore{display:none}",
             self.html)
 
-    def test_mobile_sheet_can_be_opened_from_home_and_open_chat_headers(self):
+    def test_mobile_home_and_chat_menus_do_not_expose_current_state(self):
         self.assertEqual(
             len(re.findall(
                 r'<button[^>]+data-current-state-trigger(?:\s|>)',
-                self.html, re.DOTALL)), 2)
+                self.html, re.DOTALL)), 0)
         for trigger in ("mobileHomeStateBtn", "mobileChatStateBtn"):
-            self.assertIn('id="{}"'.format(trigger), self.html)
-        self.assertEqual(
-            self.html.count('aria-controls="mobileCurrentStateSheet"'), 2)
-        self.assertIn(
-            "openMobileCurrentState(event.currentTarget)", self.html)
+            self.assertNotIn('id="{}"'.format(trigger), self.html)
+        self.assertNotIn('aria-controls="mobileCurrentStateSheet"', self.html)
         self.assertIn(
             "body.sessionChromeHidden #mobileHeader{display:flex}",
             self.html)

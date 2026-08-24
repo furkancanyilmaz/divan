@@ -36,6 +36,23 @@ class LivingMapTrustChainTests(HTTPTestCase):
                 (conv_id, content, created or self.stamp),
             ).lastrowid
 
+    def completed_turn(self, conv_id, content, created=None):
+        stamp = created or self.stamp
+        user_id = self.user_message(conv_id, content, stamp)
+        assistant_id = self.assistant_message(conv_id, "tamamlanmış yanıt", stamp)
+        with app.db() as conn:
+            job_id = conn.execute(
+                "INSERT INTO jobs(kind,conv,status,created,updated) "
+                "VALUES('chat_response',?,'succeeded',?,?)",
+                (conv_id, stamp, stamp)).lastrowid
+            conn.execute(
+                "INSERT INTO chat_requests(request_id,job,conv,user_message,"
+                "assistant_message,status,created,updated) VALUES(?,?,?,?,?,"
+                "'completed',?,?)",
+                ("living-map-turn-{:012d}".format(user_id), job_id, conv_id,
+                 user_id, assistant_id, stamp, stamp))
+        return user_id
+
     def candidate_json(
             self, supporting_ids, *, claim_type="pattern",
             title="Eleştiride geri çekilme",
@@ -790,33 +807,35 @@ class LivingMapTrustChainTests(HTTPTestCase):
                 active, ended, archived, lesson, philosopher, council,
                 safety):
             for index in range(app.LIVING_MAP_MIN_USER_MESSAGES):
-                self.user_message(
+                self.completed_turn(
                     conv_id, "{} kaynak {}".format(conv_id, index))
         for index in range(app.LIVING_MAP_MIN_USER_MESSAGES - 1):
-            self.user_message(short, "kısa {}".format(index))
+            self.completed_turn(short, "kısa {}".format(index))
 
         with app.db() as conn:
             self.assertEqual(
                 app.living_map_backfill_conversation_ids(conn),
-                [active, ended, archived])
+                [active, short, ended, archived])
             status = app.living_map_analysis_status(conn)
-        self.assertEqual(status["eligible_count"], 3)
-        self.assertEqual(status["active_count"], 1)
+        self.assertEqual(status["eligible_count"], 4)
+        self.assertEqual(status["active_count"], 2)
         self.assertEqual(status["ended_count"], 2)
         self.assertEqual(status["archived_count"], 1)
-        self.assertEqual(status["safety_skipped_count"], 1)
+        self.assertEqual(
+            status["safety_skipped_turn_count"],
+            app.LIVING_MAP_MIN_USER_MESSAGES)
 
         app.create_job("session_postprocess", ended)
         with app.db() as conn:
             self.assertEqual(
                 app.living_map_backfill_conversation_ids(conn),
-                [active, archived])
+                [active, short, archived])
             self.assertEqual(app.living_map_analysis_status(conn)["busy_count"], 1)
 
     def test_historical_scan_watermark_reopens_only_for_new_user_source(self):
         conv_id = self.conversation()
         user_ids = [
-            self.user_message(conv_id, "kaynak {}".format(index))
+            self.completed_turn(conv_id, "kaynak {}".format(index))
             for index in range(app.LIVING_MAP_MIN_USER_MESSAGES)
         ]
         with app.db() as conn:
@@ -826,23 +845,34 @@ class LivingMapTrustChainTests(HTTPTestCase):
                 "created,finished,updated) VALUES("
                 "?,'succeeded',0,?,'',?,?,?)",
                 (conv_id, max(user_ids), self.stamp, self.stamp, self.stamp))
+            status = app.living_map_analysis_status(conn)
+            self.assertEqual(status["analyzed_turns"], 0)
             self.assertEqual(
-                app.living_map_analysis_status(conn)["remaining_count"], 0)
+                status["remaining_turns"],
+                app.LIVING_MAP_MIN_USER_MESSAGES)
 
         self.assistant_message(conv_id, "yalnız asistan yanıtı")
         with app.db() as conn:
             self.assertEqual(
-                app.living_map_analysis_status(conn)["remaining_count"], 0)
+                app.living_map_analysis_status(conn)["remaining_turns"],
+                app.LIVING_MAP_MIN_USER_MESSAGES)
 
         self.user_message(conv_id, "yeni doğrudan kullanıcı kaynağı")
         with app.db() as conn:
             self.assertEqual(
-                app.living_map_analysis_status(conn)["remaining_count"], 1)
+                app.living_map_analysis_status(conn)["remaining_turns"],
+                app.LIVING_MAP_MIN_USER_MESSAGES)
+        self.completed_turn(conv_id, "yeni tamamlanmış kullanıcı kaynağı")
+        with app.db() as conn:
+            self.assertEqual(
+                app.living_map_analysis_status(conn)["remaining_turns"],
+                app.LIVING_MAP_MIN_USER_MESSAGES + 1)
 
     def test_historical_scan_requires_consent_and_deduplicates_start(self):
         conv_id = self.conversation()
         for index in range(app.LIVING_MAP_MIN_USER_MESSAGES):
-            self.user_message(conv_id, "onay kaynağı {}".format(index))
+            self.completed_turn(
+                conv_id, "onay kaynağı {}".format(index))
         provider_id, model_id = app._configured_provider_model_snapshot()
 
         status, body, _ = self.request(
@@ -888,7 +918,7 @@ class LivingMapTrustChainTests(HTTPTestCase):
             title="Sağlam", updated="2026-07-22 12:00")
         for conv_id in (bad, good):
             for index in range(app.LIVING_MAP_MIN_USER_MESSAGES):
-                self.user_message(
+                self.completed_turn(
                     conv_id, "{} kaynak {}".format(conv_id, index))
         job_id, _ = app.create_living_map_backfill_job(
             "lmstudio", "local-model")
@@ -896,10 +926,12 @@ class LivingMapTrustChainTests(HTTPTestCase):
 
         def generate(conv_id, *_args, **_kwargs):
             calls.append(conv_id)
+            user_message = _kwargs["single_turn_user_message_id"]
             with app.db() as conn:
-                newest = conn.execute(
-                    "SELECT MAX(id) AS id FROM messages WHERE conv=? "
-                    "AND role='user'", (conv_id,)).fetchone()["id"]
+                assistant_message = conn.execute(
+                    "SELECT assistant_message FROM chat_requests WHERE "
+                    "conv=? AND user_message=? AND status='completed'",
+                    (conv_id, user_message)).fetchone()["assistant_message"]
                 stamp = app.now()
                 if conv_id == bad:
                     conn.execute(
@@ -912,11 +944,15 @@ class LivingMapTrustChainTests(HTTPTestCase):
                         (conv_id, stamp, stamp, stamp, stamp))
                 else:
                     conn.execute(
-                        "INSERT INTO insight_generation_runs("
-                        "conv,status,candidate_count,through_message_id,"
-                        "error_code,created,finished,updated) VALUES("
-                        "?,'succeeded',0,?,'',?,?,?)",
-                        (conv_id, newest, stamp, stamp, stamp))
+                        "INSERT INTO living_map_turn_analyses("
+                        "conv,user_message,assistant_message,job,source,"
+                        "schema_mode,status,created,finished,updated) VALUES("
+                        "?,?,?,?,'historical_global',0,'succeeded',?,?,?) "
+                        "ON CONFLICT(conv,user_message) DO UPDATE SET "
+                        "status='succeeded',finished=excluded.finished,"
+                        "updated=excluded.updated",
+                        (conv_id, user_message, assistant_message, job_id,
+                         stamp, stamp, stamp))
             if conv_id == bad:
                 raise ValueError("bozuk model çıktısı")
             return {"status": "succeeded", "candidate_count": 0}
@@ -932,21 +968,22 @@ class LivingMapTrustChainTests(HTTPTestCase):
         self.assertEqual(calls, [bad, good])
         self.assertEqual(
             self.row(
-                "SELECT status FROM insight_generation_runs WHERE conv=?",
+                "SELECT status FROM living_map_turn_analyses WHERE conv=?",
                 (good,))["status"],
             "succeeded")
         self.assertEqual(
             self.row("SELECT status FROM jobs WHERE id=?", (job_id,))["status"],
             "queued")
 
-    def test_insight_generation_failure_does_not_fail_session_postprocess(self):
+    def test_session_postprocess_does_not_run_living_map_generation(self):
         conv_id = self.conversation(ended=1)
         for index in range(app.LIVING_MAP_MIN_USER_MESSAGES):
             self.user_message(conv_id, "kullanıcı mesajı {}".format(index))
         job_id = app.create_job("session_postprocess", conv_id)
 
         with mock.patch.object(
-                app, "ds_complete", return_value="geçersiz-json"), \
+                app, "ds_complete",
+                side_effect=AssertionError("oturum sonu harita çağırmamalı")), \
                 mock.patch("builtins.print"), \
                 mock.patch.object(
                     app, "automatic_backup", return_value=None):
@@ -956,7 +993,7 @@ class LivingMapTrustChainTests(HTTPTestCase):
             "SELECT * FROM insight_generation_runs WHERE conv=?",
             (conv_id,),
         )
-        self.assertEqual(run["status"], "failed")
+        self.assertIsNone(run)
         self.assertEqual(
             self.row("SELECT status FROM jobs WHERE id=?", (job_id,))
             ["status"],

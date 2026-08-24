@@ -1,4 +1,5 @@
 import Darwin
+import CryptoKit
 import Foundation
 import Security
 
@@ -156,6 +157,25 @@ private final class ProcessOutputMonitor: @unchecked Sendable {
 ///
 /// `actor` olması, başlatma/kapatma çağrılarının çakışmasını engeller.
 public actor CoreRuntime {
+    /// Native models and mutations in this release implement these exact
+    /// shared-core contracts. A mismatched embedded core must fail before it
+    /// can touch the private store.
+    private static let requiredSyncProtocolVersion = 8
+    private static let requiredSchemaPathVersion = 5
+    private static let frozenRuntimeHashes = [
+        "server.py":
+            "e205b2e1efc92575cb99262ea85812e4d986369dc4635193bd9e508d31a4fe7b",
+        "index.html":
+            "9c58ff43ae90febd61c4fe2066fd7ee7649fb232af44bd2a716dc287581672d0",
+        "sync_engine.py":
+            "39005a82d5d358557e222e7de7a6c3a2284453ecf2a8ad69584a142dafacc512",
+        "sync_service.py":
+            "aab750f309884aa84b5c47be106da03459066538a3dd71a76ed6112155f3580c",
+        "secure_sync_transport.py":
+            "fef550a2b5d5c7ad27c62cbd679d5fdb07d621544ebc0edd98ac376c4f9dc5f4",
+        "assets/tus/catalog-v1.json":
+            "88d868de90435a2cc38e1c41d35c25b20bddbaa6221b412715c4009735a12182",
+    ]
     public private(set) var state: RuntimeState = .idle
 
     private let configuration: RuntimeConfiguration
@@ -323,7 +343,7 @@ public actor CoreRuntime {
             isDirectory: true
         )
         candidates.append(current.appendingPathComponent("Resources/Divan", isDirectory: true))
-        candidates.append(current.deletingLastPathComponent().appendingPathComponent("core", isDirectory: true))
+        candidates.append(current.deletingLastPathComponent().appendingPathComponent("freud-dev", isDirectory: true))
 
         for candidate in candidates {
             let canonical = candidate.standardizedFileURL.resolvingSymlinksInPath()
@@ -342,6 +362,7 @@ public actor CoreRuntime {
             "sync_engine.py", "sync_service.py", "sync_qr.py",
             "qrcodegen.py", "macos_keychain.py",
             "assets/portraits/manifest.json",
+            "assets/imagery/manifest.json",
         ]
         for relativePath in required {
             let file = directory.appendingPathComponent(relativePath)
@@ -349,6 +370,213 @@ public actor CoreRuntime {
             guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
                   !isDirectory.boolValue else {
                 throw CoreRuntimeError.invalidCore(relativePath)
+            }
+        }
+        try validateFrozenRuntimeManifest(in: directory)
+        let syncURL = directory.appendingPathComponent("sync_engine.py")
+        let syncServiceURL = directory.appendingPathComponent("sync_service.py")
+        let syncTransportURL = directory.appendingPathComponent(
+            "secure_sync_transport.py"
+        )
+        let serverURL = directory.appendingPathComponent("server.py")
+        guard let syncText = try? String(contentsOf: syncURL, encoding: .utf8),
+              syncText.range(
+                of: #"(?m)^BATCH_VERSION\s*=\s*\#(Self.requiredSyncProtocolVersion)\s*$"#,
+                options: .regularExpression
+              ) != nil else {
+            throw CoreRuntimeError.invalidCore(
+                "sync_engine.py (eşitleme protokolü v\(Self.requiredSyncProtocolVersion))"
+            )
+        }
+        guard let syncServiceText = try? String(
+                contentsOf: syncServiceURL, encoding: .utf8
+              ),
+              [
+                "clinical_confirmation_required",
+                "pending_clinical_confirmation_conv_ids",
+                "clinical_safety_pause",
+                "clinical_safety_device",
+                "clinical_safety_message",
+              ].allSatisfy(syncServiceText.contains) else {
+            throw CoreRuntimeError.invalidCore(
+                "sync_service.py (klinik eşitleme v8 güvenlik sözleşmesi)"
+            )
+        }
+        guard let syncTransportText = try? String(
+                contentsOf: syncTransportURL, encoding: .utf8
+              ),
+              [
+                "SYNC_PROTOCOL_VERSION = 8",
+                "SYNC_CAPABILITY = \"schema_checkpoint_v1\"",
+                "SCHEMA_PATH_V5_SYNC_CAPABILITY = \"schema_path_chat_v5\"",
+                "SYNC_CAPABILITIES = (",
+                "SYNC_PROTOCOL_ERROR_CODE = \"sync_protocol_update_required\"",
+                "Her iki cihazdaki Divan’ı güncelleyin; sonra yeni QR oluşturun.",
+              ].allSatisfy(syncTransportText.contains) else {
+            throw CoreRuntimeError.invalidCore(
+                "secure_sync_transport.py (eşitleme v8 / Şema v5 yeteneği)"
+            )
+        }
+        guard let serverText = try? String(contentsOf: serverURL, encoding: .utf8),
+              serverText.range(
+                of: #"(?m)^SCHEMA_PATH_VERSION\s*=\s*\#(Self.requiredSchemaPathVersion)\s*$"#,
+                options: .regularExpression
+              ) != nil,
+              [
+                "SCHEMA_PATH_V5_PROTOCOL = \"schema_path_chat_v5\"",
+                "\"next_card\": next_card",
+                "\"message_meta\": schema_message_meta_payload(",
+                "\"interaction_policy\": schema_v4_interaction_policy(",
+                "\"clinical_sync\": schema_clinical_sync_public(",
+                "def validate_schema_chat_binding(",
+                "def validate_schema_v5_chat_binding(",
+                "def schema_v5_prompt_delivery(",
+                "def schema_v5_next_card(",
+                "def schema_v5_plan_for_user_response(",
+                "def schema_v5_apply_prompt_completion(",
+                "\"presentation\": \"chat_only\"",
+                "\"accept_candidate_chat\", \"reject_candidate_chat\"",
+                "schema_binding_result",
+                "schema_chat_only_step_data",
+                "sync_import_control",
+                "sync_import_resume_required",
+                "schema_prompt_protocol",
+                "schema_prompt_intent",
+                "composer_allowed",
+                "composer_mode",
+                "\"composer_surface\": \"ordinary_chat\"",
+                "\"inline_controls_only\": False",
+                "source_assistant_message_public_id",
+                "meta_event_public_id",
+                "clinical_generation",
+                "checkpoint_public_id",
+                "expected_checkpoint_seq",
+              ].allSatisfy(serverText.contains) else {
+            throw CoreRuntimeError.invalidCore(
+                "server.py (Şema çalışma sözleşmesi v\(Self.requiredSchemaPathVersion))"
+            )
+        }
+        try Self.validateTUSCatalog(
+            at: directory.appendingPathComponent("assets/tus/catalog-v1.json")
+        )
+    }
+
+    private static func validateTUSCatalog(at url: URL) throws {
+        let maximumBytes = 8 * 1024 * 1024
+        guard let attributes = try? FileManager.default.attributesOfItem(
+                atPath: url.path
+              ),
+              let byteCount = (attributes[.size] as? NSNumber)?.intValue,
+              (1...maximumBytes).contains(byteCount),
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+              data.count == byteCount,
+              let value = try? JSONSerialization.jsonObject(with: data),
+              let catalog = value as? [String: Any],
+              catalog["protocol"] as? String == "divan_tus_catalog_v1",
+              catalog["schema_version"] as? Int == 1,
+              let fingerprint = catalog["content_fingerprint"] as? String,
+              fingerprint.range(
+                of: #"^sha256:[0-9a-f]{64}$"#,
+                options: .regularExpression
+              ) != nil,
+              (catalog["lessons"] as? [Any])?.isEmpty == false,
+              (catalog["question_areas"] as? [Any])?.isEmpty == false,
+              (catalog["reading_areas"] as? [Any])?.isEmpty == false,
+              !containsRawTUSContentKey(catalog) else {
+            throw CoreRuntimeError.invalidCore(
+                "assets/tus/catalog-v1.json (metadata-only TUS katalog v1)"
+            )
+        }
+    }
+
+    private static func containsRawTUSContentKey(_ value: Any) -> Bool {
+        let forbidden = Set([
+            "answer", "answers", "choice", "choices", "content", "contents",
+            "explanation", "explanations", "option", "options", "prompt",
+            "question", "questions", "question_text", "raw", "sentence",
+            "sentences", "sentence_text", "solution", "solutions", "stem", "text",
+        ])
+        if let dictionary = value as? [String: Any] {
+            return dictionary.contains { key, child in
+                forbidden.contains(key.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ).lowercased()) || containsRawTUSContentKey(child)
+            }
+        }
+        if let array = value as? [Any] {
+            return array.contains(where: containsRawTUSContentKey)
+        }
+        return false
+    }
+
+    private func validateFrozenRuntimeManifest(in directory: URL) throws {
+        let manifestURL = directory.appendingPathComponent(
+            "runtime-source.sha256"
+        )
+        let bundledCoreURL = Bundle.main.resourceURL?
+            .appendingPathComponent("Divan", isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        let isBundledCore = bundledCoreURL == directory.standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+            if isBundledCore {
+                throw CoreRuntimeError.invalidCore(
+                    "runtime-source.sha256 (paketlenmiş kaynak manifesti)"
+                )
+            }
+            // Explicit development cores stay usable; release packaging
+            // always creates this manifest and the bundle requires it.
+            return
+        }
+        guard let text = try? String(
+                contentsOf: manifestURL, encoding: .ascii
+              ) else {
+            throw CoreRuntimeError.invalidCore("runtime-source.sha256")
+        }
+        let runtimeFiles = Set([
+            "server.py", "index.html", "secure_sync_transport.py",
+            "sync_engine.py", "sync_service.py", "sync_qr.py",
+            "qrcodegen.py", "macos_keychain.py",
+            "assets/tus/catalog-v1.json",
+        ])
+        var manifest: [String: String] = [:]
+        let pattern = try? NSRegularExpression(
+            pattern: #"^([0-9a-f]{64})  ([A-Za-z0-9_./-]+)$"#
+        )
+        for line in text.split(whereSeparator: \.isNewline) {
+            let value = String(line)
+            let range = NSRange(value.startIndex..., in: value)
+            guard let match = pattern?.firstMatch(
+                    in: value, options: [], range: range
+                  ), match.range == range,
+                  let digestRange = Range(match.range(at: 1), in: value),
+                  let nameRange = Range(match.range(at: 2), in: value),
+                  manifest[String(value[nameRange])] == nil else {
+                throw CoreRuntimeError.invalidCore("runtime-source.sha256")
+            }
+            manifest[String(value[nameRange])] = String(value[digestRange])
+        }
+        guard Set(manifest.keys) == runtimeFiles else {
+            throw CoreRuntimeError.invalidCore("runtime-source.sha256")
+        }
+        for name in runtimeFiles {
+            let file = directory.appendingPathComponent(name)
+            guard let data = try? Data(contentsOf: file) else {
+                throw CoreRuntimeError.invalidCore(name)
+            }
+            let digest = SHA256.hash(data: data)
+                .map { String(format: "%02x", $0) }
+                .joined()
+            guard manifest[name] == digest else {
+                throw CoreRuntimeError.invalidCore(
+                    "runtime-source.sha256 (\(name))"
+                )
+            }
+            if let frozen = Self.frozenRuntimeHashes[name],
+               digest != frozen {
+                throw CoreRuntimeError.invalidCore(
+                    "\(name) (dondurulmuş sürüm kimliği)"
+                )
             }
         }
     }

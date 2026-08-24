@@ -107,7 +107,7 @@ public struct AdvancedContextPickerView: View {
     private var explanation: String {
         switch model.destination {
         case .works:
-            "Sandalye veya yeniden ebeveynlik çalışmasının bağlanacağı açık seansı seçin."
+            "Görsel çağrışım, sandalye, şema yolu, ritim veya yeniden ebeveynlik çalışmasının bağlanacağı açık seansı seçin."
         case .livingMap:
             "Haritada yeni kanıt üretmek veya ilgili seansa dönmek için açık seansı seçin."
         case .sync:

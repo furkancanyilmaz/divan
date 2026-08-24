@@ -157,6 +157,44 @@ class TechniqueLifecycleTests(HTTPTestCase):
             (proposed["run"]["id"],))
         self.assertEqual(run["status"], "proposed")
 
+    def test_enhanced_consent_requires_explicit_safe_precheck(self):
+        conv_id = self.conversation(therapist="young")
+        method = next(
+            row for row in app.method_records("young")
+            if row["risk_level"] == "enhanced")
+        status, proposed, _ = self.request(
+            "POST", "/api/technique-run", {
+                "conv_id": conv_id, "action": "propose",
+                "method_key": method["key"], "intensity": 3,
+            })
+        self.assertEqual(status, 200, proposed)
+
+        status, body, _ = self.request(
+            "POST", "/api/technique-run", {
+                "conv_id": conv_id, "id": proposed["run"]["id"],
+                "action": "consent", "confirmed": True,
+            })
+        self.assertEqual(status, 409, body)
+        self.assertIn("başlangıç", body["error"].casefold())
+        self.assertEqual(self.row(
+            "SELECT status FROM technique_runs WHERE id=?",
+            (proposed["run"]["id"],))["status"], "proposed")
+
+        status, meta, _ = self.request(
+            "POST", "/api/session-meta", {
+                "conv_id": conv_id, "precheck_done": True,
+                "safety_ok": True, "anxiety_start": 3,
+                "intensity_limit": 7,
+            })
+        self.assertEqual(status, 200, meta)
+        status, consented, _ = self.request(
+            "POST", "/api/technique-run", {
+                "conv_id": conv_id, "id": proposed["run"]["id"],
+                "action": "consent", "confirmed": True,
+            })
+        self.assertEqual(status, 200, consented)
+        self.assertEqual(consented["run"]["status"], "active")
+
     def test_crisis_pauses_active_technique_in_grounding_phase(self):
         conv_id = self.conversation(therapist="young")
         _, proposed, _ = self.request(

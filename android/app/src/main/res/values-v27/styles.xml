@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Divan" parent="@style/Theme.DivanBase">
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <style name="Theme.Divan.Starting" parent="@style/Theme.Divan">
+        <item name="android:windowBackground">@drawable/divan_launch_screen</item>
+        <item name="android:statusBarColor">@color/divan_launcher_background</item>
+        <item name="android:navigationBarColor">@color/divan_launcher_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

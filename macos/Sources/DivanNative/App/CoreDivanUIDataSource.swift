@@ -235,12 +235,25 @@ public final class CoreDivanUIDataSource: DivanUIDataSource, @unchecked Sendable
         conversationID: Int,
         text: String
     ) async -> AsyncThrowingStream<DivanChatUpdate, Error> {
+        await sendMessage(
+            conversationID: conversationID,
+            text: text,
+            schemaBinding: nil
+        )
+    }
+
+    public func sendMessage(
+        conversationID: Int,
+        text: String,
+        schemaBinding: SchemaChatBinding?
+    ) async -> AsyncThrowingStream<DivanChatUpdate, Error> {
         do {
             let (client, _) = try await loader.service()
             let events = try await client.sendMessage(
                 conversationID: conversationID,
                 text: text,
-                replyTo: nil
+                replyTo: nil,
+                schemaBinding: schemaBinding
             )
             return AsyncThrowingStream { continuation in
                 let task = Task {
@@ -267,6 +280,41 @@ public final class CoreDivanUIDataSource: DivanUIDataSource, @unchecked Sendable
         return Self.pendingChat(try await client.chatStatus(requestID: requestID))
     }
 
+    public func schemaPath(
+        conversationID: Int
+    ) async throws -> SchemaPathSnapshot {
+        let (client, _) = try await loader.service()
+        return try await client.schemaPath(conversationID: conversationID)
+    }
+
+    public func mutateSchemaPath(
+        _ mutation: SchemaPathMutation
+    ) async throws -> SchemaPathMutationResponse {
+        let (client, _) = try await loader.service()
+        return try await client.mutateSchemaPath(mutation)
+    }
+
+    public func mutateSchemaCard(
+        _ mutation: SchemaCardMutation
+    ) async throws -> SchemaPathMutationResponse {
+        let (client, _) = try await loader.service()
+        return try await client.mutateSchemaCard(mutation)
+    }
+
+    public func mutateSchemaClinicalSync(
+        _ mutation: SchemaClinicalSyncMutation
+    ) async throws -> SchemaPathMutationResponse {
+        let (client, _) = try await loader.service()
+        return try await client.mutateSchemaClinicalSync(mutation)
+    }
+
+    public func mutateSchemaTurnAnalysis(
+        _ mutation: SchemaTurnAnalysisMutation
+    ) async throws -> SchemaTurnAnalysisMutationResponse {
+        let (client, _) = try await loader.service()
+        return try await client.mutateSchemaTurnAnalysis(mutation)
+    }
+
     public func portraitData(url: URL) async throws -> Data {
         let (client, _) = try await loader.service()
         return try await client.portraitData(url: url)
@@ -283,11 +331,30 @@ public final class CoreDivanUIDataSource: DivanUIDataSource, @unchecked Sendable
         let value = try await client.saveSettings(ProviderSettingsUpdate(
             providerID: input.provider.rawValue,
             modelID: input.modelName,
-            localBaseURL: input.provider == .lmStudio ? input.baseURL : nil,
+            localBaseURL: input.provider.isLocal ? input.baseURL : nil,
             apiKey: input.newAPIKey,
             clearAPIKey: false
         ))
         return Self.settings(value)
+    }
+
+    public func scanLocalModels() async throws -> [DivanLocalServer] {
+        let (client, _) = try await loader.service()
+        let servers = try await client.scanLocalModels()
+        return servers.map { server in
+            let providerID = server.provider.flatMap {
+                DivanProviderID(rawValue: $0.localizedLowercase)
+            }
+            return DivanLocalServer(
+                id: server.provider?.isEmpty == false
+                    ? (server.provider ?? UUID().uuidString)
+                    : "generic-\(server.baseUrl ?? "")",
+                label: server.label ?? "Yerel sunucu",
+                baseURL: server.baseUrl ?? "",
+                models: server.models ?? [],
+                provider: providerID
+            )
+        }
     }
 
     public func clearAPIKey(provider: DivanProviderID) async throws
@@ -298,6 +365,11 @@ public final class CoreDivanUIDataSource: DivanUIDataSource, @unchecked Sendable
             clearAPIKey: true
         ))
         return Self.settings(value)
+    }
+
+    public func setGuestMode(_ active: Bool) async throws -> DivanSettingsSummary {
+        let (client, _) = try await loader.service()
+        return Self.settings(try await client.setGuestMode(active))
     }
 
     private static func master(_ value: MasterSummary) -> DivanMaster {
@@ -341,7 +413,12 @@ public final class CoreDivanUIDataSource: DivanUIDataSource, @unchecked Sendable
             content: value.content,
             createdAt: date(value.createdAt),
             isPending: ["pending", "running", "retrying"]
-                .contains(value.deliveryStatus?.localizedLowercase ?? "")
+                .contains(value.deliveryStatus?.localizedLowercase ?? ""),
+            technique: value.technique,
+            schemaMetaEvents: value.metaEvents,
+            schemaBindingResult: value.schemaBindingResult,
+            publicID: value.publicID,
+            deliveryStatus: value.deliveryStatus
         )
     }
 
@@ -349,26 +426,42 @@ public final class CoreDivanUIDataSource: DivanUIDataSource, @unchecked Sendable
         let providerID = provider(value.selectedProviderID)
         let selected = value.providers.first { $0.id == value.selectedProviderID }
             ?? value.providers.first
-        let local = selected?.isLocal ?? (providerID == .lmStudio)
+        let local = selected?.isLocal ?? providerID.isLocal
         let keyStored = selected?.keySet ?? false
         let state: DivanProviderState = local || keyStored ? .ready : .needsAttention
         let detail: String
         if local {
-            detail = selected?.baseURL ?? "Yerel LM Studio adresi ayarlanmalı"
+            detail = selected?.baseURL ?? providerID.defaultBaseURL
         } else if keyStored {
             detail = "API anahtarı güvenli biçimde kayıtlı"
         } else {
             detail = "Sohbet için API anahtarı gerekli"
         }
+        // Sunucuda saklanan her sağlayıcının özeti UI'a birebir taşınır;
+        // sağlayıcılar arasında geçişte model/adres/anahtar durumu buradan
+        // hatırlanır.
+        let snapshots = value.providers.map { summary -> DivanProviderSnapshot in
+            let id = provider(summary.id)
+            return DivanProviderSnapshot(
+                provider: id,
+                label: summary.label,
+                model: summary.model,
+                baseURL: summary.baseURL,
+                keySet: summary.keySet,
+                isLocal: summary.isLocal || id.isLocal
+            )
+        }
         return DivanSettingsSummary(
             provider: providerID,
             providerName: selected?.label ?? providerID.title,
             modelName: selected?.model ?? "",
-            baseURL: selected?.baseURL ?? "http://127.0.0.1:1234/v1",
+            baseURL: selected?.baseURL ?? providerID.defaultBaseURL,
             connectionDetail: detail,
             state: state,
             apiKeyStored: keyStored,
-            localOnly: local
+            localOnly: local,
+            guestMode: value.guestMode,
+            providers: snapshots
         )
     }
 
@@ -379,14 +472,20 @@ public final class CoreDivanUIDataSource: DivanUIDataSource, @unchecked Sendable
             content: value.content,
             retryable: value.retryable,
             isPending: value.pending || !value.isTerminal,
-            waitingForProvider: value.waitingForProvider
+            waitingForProvider: value.waitingForProvider,
+            schemaBindingResult: value.schemaBindingResult,
+            schemaPromptProtocol: value.schemaPromptProtocol,
+            schemaPromptIntent: value.schemaPromptIntent
         )
     }
 
     private static func chatUpdate(_ event: ChatEvent) -> DivanChatUpdate {
         switch event.kind {
         case .accepted:
-            return .accepted(requestID: event.requestID)
+            return .accepted(
+                requestID: event.requestID,
+                userMessageID: event.userMessageID
+            )
         case .thinking:
             return .assistantStarted(
                 messageID: event.assistantMessageID,
@@ -415,7 +514,14 @@ public final class CoreDivanUIDataSource: DivanUIDataSource, @unchecked Sendable
             if status.isEmpty || status == "completed" {
                 return .assistantCompleted(
                     messageID: event.assistantMessageID,
-                    createdAt: Date()
+                    createdAt: Date(),
+                    technique: event.technique,
+                    messageMeta: event.messageMeta,
+                    nextCard: event.nextCard,
+                    schemaPath: event.schemaPath,
+                    interactionPolicy: event.interactionPolicy,
+                    resumeState: event.resumeState,
+                    schemaBindingResult: event.schemaBindingResult
                 )
             }
             if ["queued", "running", "waiting_provider", "retrying"]

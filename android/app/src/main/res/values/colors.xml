@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="divan_background">#17120F</color>
-    <color name="divan_gold">#D7B27C</color>
+    <color name="divan_background">#F7F1E6</color>
+    <color name="divan_ink">#3A2B27</color>
+    <color name="divan_wine">#572330</color>
+    <color name="divan_gold">#A87945</color>
+    <color name="divan_launcher_background">#572330</color>
 </resources>

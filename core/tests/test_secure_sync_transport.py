@@ -45,6 +45,8 @@ class SecureSyncTransportTests(unittest.TestCase):
         value = {
             "session_id": payload["session_id"],
             "pairing_secret": payload["pairing_secret"],
+            "protocol_version": sync.SYNC_PROTOCOL_VERSION,
+            "capabilities": list(sync.SYNC_CAPABILITIES),
             "device": {
                 "id": "b" * 32,
                 "public_key": public_key,
@@ -75,8 +77,18 @@ class SecureSyncTransportTests(unittest.TestCase):
 
     def test_invitation_schema_manual_roundtrip_and_redacted_repr(self):
         payload = self.invitation.payload
+        self.assertEqual(sync.SYNC_PROTOCOL_VERSION, 8)
+        self.assertEqual(sync.SYNC_CAPABILITIES, (
+            "schema_checkpoint_v1", "schema_path_chat_v5"))
         self.assertEqual(payload["scheme"], "https")
         self.assertEqual(payload["path"], "/v1")
+        self.assertEqual(
+            payload["protocol_version"], sync.SYNC_PROTOCOL_VERSION)
+        self.assertEqual(
+            payload["capabilities"], list(sync.SYNC_CAPABILITIES))
+        self.assertIn(
+            sync.SCHEMA_PATH_V5_SYNC_CAPABILITY,
+            payload["capabilities"])
         self.assertRegex(payload["cert_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(
             sync.decode_manual_code(self.invitation.manual_code), payload)
@@ -98,6 +110,10 @@ class SecureSyncTransportTests(unittest.TestCase):
         status, paired = self.pair()
         self.assertEqual(status, 200)
         self.assertTrue(paired["ok"])
+        self.assertEqual(
+            paired["protocol_version"], sync.SYNC_PROTOCOL_VERSION)
+        self.assertEqual(
+            paired["capabilities"], list(sync.SYNC_CAPABILITIES))
         self.assertNotIn(
             self.invitation.payload["pairing_secret"],
             json.dumps(paired))
@@ -133,6 +149,60 @@ class SecureSyncTransportTests(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertIn("kullanıldı", body["error"])
 
+    def test_protocol_mismatch_is_stable_and_does_not_consume_secret(self):
+        status, body = self.pair(protocol_version=7)
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            body["error_code"], sync.SYNC_PROTOCOL_ERROR_CODE)
+        self.assertEqual(body["error"], sync.SYNC_PROTOCOL_ERROR_COPY)
+
+        status, paired = self.pair(request_id=request_id(99))
+        self.assertEqual(status, 200)
+        self.assertTrue(paired["ok"])
+
+    def test_legacy_invitation_fails_before_network_or_pairing(self):
+        legacy = dict(self.invitation.payload)
+        legacy.pop("protocol_version")
+        legacy.pop("capabilities")
+        with self.assertRaises(sync.SyncProtocolMismatchError) as raised:
+            sync.parse_invitation(legacy)
+        self.assertEqual(str(raised.exception), sync.SYNC_PROTOCOL_ERROR_COPY)
+
+    def test_capability_allowlist_is_exact(self):
+        # A v7 peer knows only the legacy checkpoint capability and cannot
+        # consume a v5 path, even if it lies about the numeric protocol.
+        status, body = self.pair(
+            capabilities=[sync.SYNC_CAPABILITY])
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            body["error_code"], sync.SYNC_PROTOCOL_ERROR_CODE)
+        status, body = self.pair(
+            capabilities=list(sync.SYNC_CAPABILITIES) + [
+                "future_capability"])
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            body["error_code"], sync.SYNC_PROTOCOL_ERROR_CODE)
+        status, paired = self.pair(request_id=request_id(98))
+        self.assertEqual(status, 200)
+        self.assertTrue(paired["ok"])
+
+    def test_failed_pair_helper_discards_local_secret_and_session(self):
+        client = sync.PinnedSyncClient(self.invitation)
+        with mock.patch.object(
+                client, "pair",
+                side_effect=sync.SyncProtocolMismatchError(
+                    sync.SYNC_PROTOCOL_ERROR_COPY)), \
+                mock.patch.object(
+                    sync, "PinnedSyncClient", return_value=client):
+            with self.assertRaises(sync.SyncProtocolMismatchError):
+                sync.pair_with_invitation(
+                    self.invitation, device_id="b" * 32,
+                    public_key=b"test-public-key-material-" * 4,
+                    name="Telefon", platform="android")
+        self.assertEqual(
+            client._invitation["pairing_secret"], "<discarded>")
+        self.assertIsNone(client._session_token)
+
     def test_pair_attempt_rate_limit(self):
         payload = self.invitation.payload
         public_key = b64url(b"test-public-key-material-" * 4)
@@ -142,6 +212,8 @@ class SecureSyncTransportTests(unittest.TestCase):
                 payload["cert_sha256"], {
                     "session_id": payload["session_id"],
                     "pairing_secret": b64url(b"\x00" * 32),
+                    "protocol_version": sync.SYNC_PROTOCOL_VERSION,
+                    "capabilities": list(sync.SYNC_CAPABILITIES),
                     "device": {
                         "id": "b" * 32,
                         "public_key": public_key,

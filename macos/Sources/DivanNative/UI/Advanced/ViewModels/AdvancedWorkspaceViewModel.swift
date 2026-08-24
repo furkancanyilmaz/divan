@@ -4,14 +4,17 @@ import SwiftUI
 @MainActor
 public final class AdvancedWorkspaceViewModel: ObservableObject {
     public let context: AdvancedWorkspaceContext
+    public let supportsStructuredTherapy: Bool
 
     @Published public var selectedModule: AdvancedModule
     @Published public private(set) var chairConfiguration: WorkspaceChairConfiguration = .twoPartDefault
     @Published public private(set) var clinicalIntensityLimit = 10
     @Published public private(set) var clinicalSafetyHold = false
     @Published public private(set) var chairAvailable = false
+    @Published public private(set) var chairRequiresPrecheck = false
     @Published public private(set) var chairUnavailableReason: String?
     @Published public private(set) var imageryAvailable = false
+    @Published public private(set) var imageryRequiresPrecheck = false
     @Published public private(set) var imageryUnavailableReason: String?
     @Published public private(set) var chairSession: WorkspaceChairSession?
     @Published public private(set) var imagerySession: WorkspaceImagerySession?
@@ -28,6 +31,9 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
     @Published public var chairIntensity = 3
     @Published public var chairOrientationConfirmed = false
     @Published public var chairFrameConfirmed = false
+    @Published public var chairRealityConfirmed = false
+    @Published public var chairSleepActivationClear = false
+    @Published public var chairSupportAvailable: Bool?
     @Published public var chairTurnDraft = ""
     @Published public var chairClosureAction: WorkspaceChairClosureAction = .ground
     @Published public var chairClosureCheckpointConfirmed = false
@@ -59,6 +65,8 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
     @Published public var imageryOrientationConfirmed = false
     @Published public var imageryFrameConfirmed = false
     @Published public var imageryRealityConfirmed = false
+    @Published public var imagerySleepActivationClear = false
+    @Published public var imagerySupportAvailable: Bool?
     @Published public var imageryStopSignal = "Dur"
     @Published public var imagerySceneBoundary = "Sahneyi uzaktan, bulunduğum odanın farkında kalarak izleyeceğim."
     @Published public var imageryCheckpointConfirmed = false
@@ -90,10 +98,12 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
     public init(
         dataSource: any AdvancedWorkspaceDataSource,
         context: AdvancedWorkspaceContext,
-        initialModule: AdvancedModule = .chairWork
+        initialModule: AdvancedModule = .chairWork,
+        supportsStructuredTherapy: Bool = false
     ) {
         self.dataSource = dataSource
         self.context = context
+        self.supportsStructuredTherapy = supportsStructuredTherapy
         self.selectedModule = context.allowsClinicalWork ? initialModule : .wifiSync
     }
 
@@ -101,10 +111,29 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
 
     public var imageryConsentComplete: Bool {
         imageryOrientationConfirmed && imageryFrameConfirmed && imageryRealityConfirmed
+            && (!imageryRequiresPrecheck || (
+                imagerySleepActivationClear
+                    && imagerySupportAvailable != nil
+                    && imageryIntensity <= 7
+            ))
     }
 
     public var chairConsentComplete: Bool {
         chairOrientationConfirmed && chairFrameConfirmed
+            && (!chairRequiresPrecheck || (
+                chairRealityConfirmed
+                    && chairSleepActivationClear
+                    && chairSupportAvailable != nil
+                    && chairIntensity <= 7
+            ))
+    }
+
+    public var chairStartIntensityMaximum: Int {
+        min(clinicalIntensityLimit, chairRequiresPrecheck ? 7 : 10)
+    }
+
+    public var imageryStartIntensityMaximum: Int {
+        min(clinicalIntensityLimit, imageryRequiresPrecheck ? 7 : 10)
     }
 
     public var selectedImageryChoice: WorkspaceImageryChoice? {
@@ -135,8 +164,10 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
             // catalog.  In particular, a proposed record still needs to expose
             // the user's explicit “Onayla ve başlat” gate.
             chairAvailable = snapshot.chairAvailable || snapshot.chairSession != nil
+            chairRequiresPrecheck = snapshot.chairRequiresPrecheck
             chairUnavailableReason = snapshot.chairUnavailableReason
             imageryAvailable = snapshot.imageryAvailable
+            imageryRequiresPrecheck = snapshot.imageryRequiresPrecheck
             imageryUnavailableReason = snapshot.imageryUnavailableReason
             chairConfiguration = snapshot.chairConfiguration
             chairSession = snapshot.chairSession
@@ -146,8 +177,8 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
             if snapshot.chairSession == nil, isFirstSuccessfulLoad {
                 chairParticipantTitles = normalizedDefaultParticipantTitles(snapshot.chairConfiguration)
             }
-            chairIntensity = min(chairIntensity, snapshot.clinicalIntensityLimit)
-            imageryIntensity = min(imageryIntensity, snapshot.clinicalIntensityLimit)
+            chairIntensity = min(chairIntensity, chairStartIntensityMaximum)
+            imageryIntensity = min(imageryIntensity, imageryStartIntensityMaximum)
             if let chairSession = snapshot.chairSession {
                 chairIntensity = min(chairSession.intensity, chairSession.intensityLimit)
                 resetChairResumeInput()
@@ -254,13 +285,19 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
                     startingParticipantIndex: 0,
                     intensity: chairIntensity,
                     orientationConfirmed: chairOrientationConfirmed,
-                    frameConfirmed: chairFrameConfirmed
+                    frameConfirmed: chairFrameConfirmed,
+                    realityConfirmed: chairRealityConfirmed,
+                    sleepActivationClear: chairSleepActivationClear,
+                    supportAvailable: chairSupportAvailable
                 )
             )
         } onSuccess: { session in
             chairIntensity = min(session.intensity, session.intensityLimit)
             chairOrientationConfirmed = false
             chairFrameConfirmed = false
+            chairRealityConfirmed = false
+            chairSleepActivationClear = false
+            chairSupportAvailable = nil
             resetChairResumeInput()
         }
     }
@@ -276,9 +313,12 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
         chairGoalText = ""
         chairStopSignal = "Dur"
         chairParticipantTitles = normalizedDefaultParticipantTitles(chairConfiguration)
-        chairIntensity = min(3, clinicalIntensityLimit)
+        chairIntensity = min(3, chairStartIntensityMaximum)
         chairOrientationConfirmed = false
         chairFrameConfirmed = false
+        chairRealityConfirmed = false
+        chairSleepActivationClear = false
+        chairSupportAvailable = nil
         chairNewParticipantTitle = ""
         failure = nil
         resetChairClosureInput()
@@ -502,13 +542,17 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
                     frameConfirmed: imageryFrameConfirmed,
                     realityConfirmed: imageryRealityConfirmed,
                     stopSignal: stopSignal,
-                    sceneBoundary: sceneBoundary
+                    sceneBoundary: sceneBoundary,
+                    sleepActivationClear: imagerySleepActivationClear,
+                    supportAvailable: imagerySupportAvailable
                 )
             )
         } onSuccess: { _ in
             imageryOrientationConfirmed = false
             imageryFrameConfirmed = false
             imageryRealityConfirmed = false
+            imagerySleepActivationClear = false
+            imagerySupportAvailable = nil
             resetImageryCheckpointInput()
         }
     }
@@ -751,11 +795,36 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
         }
     }
 
+    public func resolveSyncClinicalConfirmation(
+        conversationID: Int,
+        enabled: Bool
+    ) async {
+        await perform(
+            enabled
+                ? "Bu cihazdaki Şema eşitleme onayı kaydediliyor…"
+                : "Bu cihazda Şema eşitlemesi kapalı tutuluyor…",
+            retry: .refreshSync
+        ) {
+            setSyncStatus(
+                try await dataSource.resolveWiFiClinicalConfirmation(
+                    conversationID: conversationID,
+                    enabled: enabled
+                )
+            )
+        }
+    }
+
     // MARK: Helpers
 
     public func moduleIsAvailable(_ module: AdvancedModule) -> Bool {
         guard context.allowsClinicalWork || !module.isClinical else { return false }
         return switch module {
+        case .adhdSupport:
+            supportsStructuredTherapy && context.masterID == "adhd"
+        case .schemaPath:
+            false
+        case .freudImagery:
+            supportsStructuredTherapy && context.masterID == "freud"
         case .chairWork: chairAvailable
         case .reparenting: imageryAvailable
         case .livingMap, .wifiSync: true
@@ -767,6 +836,14 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
             return AdvancedWorkspaceValidationError.clinicalWorkUnavailable.localizedDescription
         }
         return switch module {
+        case .adhdSupport:
+            supportsStructuredTherapy && context.masterID == "adhd"
+                ? nil : "Bu alan yalnız açık ADHD Koçu görüşmesinde kullanılabilir."
+        case .schemaPath:
+            "Şema çalışması ayrı bir alan açmadan Kerem Genç konuşmasında sürer."
+        case .freudImagery:
+            supportsStructuredTherapy && context.masterID == "freud"
+                ? nil : "Bu alan yalnız Freud ile açık ana terapi görüşmesinde kullanılabilir."
         case .chairWork:
             chairAvailable ? nil : chairUnavailableReason
                 ?? "Bu ustanın yayımlanmış yöntem kataloğunda sandalye çalışması bulunmuyor."
@@ -888,6 +965,12 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
         let direction: String
         if let experientialFallback {
             direction = "Aynı seanstaki kullanılabilir \(experientialFallback.title.lowercased()) alanı açıldı."
+        } else if requestedModule == .adhdSupport {
+            direction = "Açık bir ADHD Koçu görüşmesi seçin."
+        } else if requestedModule == .schemaPath {
+            direction = "Açık bir Şema Terapi görüşmesi seçin."
+        } else if requestedModule == .freudImagery {
+            direction = "Açık bir Freud ana terapi görüşmesinde Serbest Çağrışım yöntemini seçin."
         } else if requestedModule == .chairWork {
             direction = "Perls veya Young gibi sandalye protokolü yayımlanmış bir terapistin seansını seçin."
         } else if requestedModule == .reparenting {
@@ -990,6 +1073,9 @@ public final class AdvancedWorkspaceViewModel: ObservableObject {
         // partially stored booleans are never treated as a current click.
         chairOrientationConfirmed = false
         chairFrameConfirmed = false
+        chairRealityConfirmed = false
+        chairSleepActivationClear = false
+        chairSupportAvailable = nil
     }
 
     private func normalizedDefaultParticipantTitles(

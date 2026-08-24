@@ -3,8 +3,4 @@
     <string name="app_name">Divan</string>
     <string name="loading_message">Divan hazırlanıyor…</string>
     <string name="retry">Yeniden dene</string>
-    <string name="notification_channel_name">Tamamlanan işlemler</string>
-    <string name="notification_channel_description">Yalnız siz açtığınızda, Divan’daki bir işlemin tamamlandığını nötr biçimde bildirir.</string>
-    <string name="notification_ready_title">Divan</string>
-    <string name="notification_ready_text">Divan’daki işlem tamamlandı.</string>
 </resources>

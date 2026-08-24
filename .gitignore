@@ -37,6 +37,9 @@ android/local.properties
 assets/portraits/*.jpg
 assets/portraits/*.png
 !assets/portraits/README.md
+**/assets/portraits/*.jpg
+**/assets/portraits/*.png
+!**/assets/portraits/README.md
 
 # --- Editör ---
 .vscode/

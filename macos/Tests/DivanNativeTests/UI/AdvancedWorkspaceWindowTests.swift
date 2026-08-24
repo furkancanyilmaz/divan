@@ -159,6 +159,63 @@ final class AdvancedWorkspaceWindowTests: XCTestCase {
         try assertChairPhaseRoutingContract()
     }
 
+    func testWiFiSyncShowsExplicitLocalClinicalConfirmationChoices() throws {
+        let project = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: project.appendingPathComponent(
+                "Sources/DivanNative/UI/Advanced/Views/WiFiSyncView.swift"
+            ),
+            encoding: .utf8
+        )
+        for required in [
+            "Şema çalışmalarında bu cihazın kararı gerekli",
+            "Bu cihazda onayla",
+            "Kapalı tut",
+            "syncClinicalConfirmation",
+            "syncClinicalConfirm.",
+            "syncClinicalKeepOff.",
+            "model.resolveSyncClinicalConfirmation",
+            "model sağlayıcısı onayı değişmez",
+        ] {
+            XCTAssertTrue(
+                source.contains(required),
+                "Mac v6 klinik cihaz-onayı yüzeyi eksik: \(required)"
+            )
+        }
+    }
+
+    func testWiFiSyncShowsSafetyPauseWithoutAConsentCTA() throws {
+        let project = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: project.appendingPathComponent(
+                "Sources/DivanNative/UI/Advanced/Views/WiFiSyncView.swift"
+            ),
+            encoding: .utf8
+        )
+        for required in [
+            "if status.clinicalSafetyPause",
+            "} else if status.clinicalConfirmationRequired",
+            "Şema kayıtları güvenlik beklemesinde",
+            "Güvenlik beklemesi kapandıktan sonra yeni bir QR oluşturup yeniden eşitleyin.",
+            "syncClinicalSafetyPause",
+            "Bekleme kapandıysa yeni QR oluştur",
+            "syncSafetyCreateFreshQR",
+        ] {
+            XCTAssertTrue(
+                source.contains(required),
+                "Mac v6 klinik güvenlik beklemesi yüzeyi eksik: \(required)"
+            )
+        }
+    }
+
     func testActivePausedAndCompletedChairPhasesExposeNonStartNextStepsAtAcceptanceSizes() async throws {
         let phases: [WorkspaceWorkPhase] = [.active, .paused, .completed]
         for phase in phases {

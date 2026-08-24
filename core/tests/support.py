@@ -33,6 +33,8 @@ class DatabaseTestCase(unittest.TestCase):
         self._old_chat_cancel_events = dict(app.CHAT_CANCEL_EVENTS)
         self._old_chat_active_responses = dict(app.CHAT_ACTIVE_RESPONSES)
         self._old_chat_retry_timers = dict(app.CHAT_RETRY_TIMERS)
+        self._old_living_map_autoscan_timers = dict(
+            app.LIVING_MAP_AUTOSCAN_TIMERS)
         self._tmp = tempfile.TemporaryDirectory()
         app.DB_PATH = str(Path(self._tmp.name) / "test-freud.db")
         app.JOB_QUEUE = queue.Queue()
@@ -46,6 +48,10 @@ class DatabaseTestCase(unittest.TestCase):
             app.CHAT_CANCEL_EVENTS.clear()
             app.CHAT_ACTIVE_RESPONSES.clear()
             app.CHAT_RETRY_TIMERS.clear()
+        with app.LIVING_MAP_AUTOSCAN_TIMER_LOCK:
+            for timer in app.LIVING_MAP_AUTOSCAN_TIMERS.values():
+                timer.cancel()
+            app.LIVING_MAP_AUTOSCAN_TIMERS.clear()
         app.configure_secret_store(None, None, migrate=False)
         self._network_patch = mock.patch.object(
             app.urllib.request, "urlopen",
@@ -74,6 +80,12 @@ class DatabaseTestCase(unittest.TestCase):
             app.CHAT_RETRY_TIMERS.clear()
             app.CHAT_RETRY_TIMERS.update(
                 self._old_chat_retry_timers)
+        with app.LIVING_MAP_AUTOSCAN_TIMER_LOCK:
+            for timer in app.LIVING_MAP_AUTOSCAN_TIMERS.values():
+                timer.cancel()
+            app.LIVING_MAP_AUTOSCAN_TIMERS.clear()
+            app.LIVING_MAP_AUTOSCAN_TIMERS.update(
+                self._old_living_map_autoscan_timers)
         app.configure_secret_store(
             self._old_secret_reader, self._old_secret_writer, migrate=False)
         self._tmp.cleanup()

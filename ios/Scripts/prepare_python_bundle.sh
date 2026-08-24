@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-SOURCE_ROOT="$PROJECT_DIR/../core"
+SOURCE_ROOT="$PROJECT_DIR/../freud-dev"
 IOS_PYTHON_ROOT="$PROJECT_DIR/DivanPython"
 APP_DESTINATION="$CODESIGNING_FOLDER_PATH/app"
 PACKAGES_DESTINATION="$CODESIGNING_FOLDER_PATH/app_packages"
@@ -53,11 +53,50 @@ do
     fi
 done
 
-if ! grep -E -q '^BATCH_VERSION[[:space:]]*=[[:space:]]*2[[:space:]]*$' \
+if ! grep -E -q '^BATCH_VERSION[[:space:]]*=[[:space:]]*3[[:space:]]*$' \
         "$APP_DESTINATION/sync_engine.py"; then
-    echo "iOS paketi cihaz eşitleme protokolü v2'yi içermiyor." >&2
+    echo "iOS paketi cihaz eşitleme protokolü v3'ü içermiyor." >&2
     exit 1
 fi
+for marker in \
+    '"adhd_habit": RecordSpec(' \
+    '_ADHD_EVENT_SYNC_STATUSES' \
+    '_projection_payload_allowed' \
+    'DEVICE_LOCAL_CLINICAL_TABLES'
+do
+    if ! grep -F -q "$marker" "$APP_DESTINATION/sync_engine.py"; then
+        echo "iOS paketi güvenli ADHD eşitleme projeksiyonunu içermiyor: $marker" >&2
+        exit 1
+    fi
+done
+
+# Do not allow an iOS build from an older sibling freud-dev checkout. The
+# shared files are copied on every build, so these markers are the release
+# contract for the structured ADHD and Schema Therapy workspaces.
+for marker in \
+    'path == "/api/adhd/dashboard"' \
+    'path == "/api/adhd/habits"' \
+    'path == "/api/adhd/journal"' \
+    'path == "/api/schema-path"' \
+    'suppressed_safety'
+do
+    if ! grep -F -q "$marker" "$APP_DESTINATION/server.py"; then
+        echo "iOS ortak kaynakları güncel ADHD/Şema motorunu içermiyor: $marker" >&2
+        exit 1
+    fi
+done
+
+for marker in \
+    'id="adhdWorkspaceOverlay"' \
+    'id="adhdJournalForm"' \
+    'id="schemaPathOverlay"' \
+    'scheduleReminderNotificationFor'
+do
+    if ! grep -F -q "$marker" "$APP_DESTINATION/index.html"; then
+        echo "iOS ortak kaynakları güncel ADHD/Şema arayüzünü içermiyor: $marker" >&2
+        exit 1
+    fi
+done
 
 if find "$APP_DESTINATION" "$PACKAGES_DESTINATION" -type f \( \
     -name '*.db' -o -name '*.db-*' -o -name '*.sqlite' -o \

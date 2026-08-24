@@ -143,6 +143,28 @@ final class ResponsiveLayoutTests: XCTestCase {
                 size: size,
                 scenario: "Wi-Fi sync"
             )
+
+            let safetySource = AdvancedSafetyDataSource(
+                syncStatus: WorkspaceWiFiSyncStatus(
+                    phase: .awaitingClinicalSafety,
+                    message: "Bu cihazdaki güvenlik beklemesi sürerken Şema çalışma kayıtları alınmadı.",
+                    peerName: "Android",
+                    clinicalSafetyPause: true,
+                    clinicalSafetyDevice: .thisDevice,
+                    clinicalSafetyMessage: "Bu cihazdaki güvenlik beklemesi sürerken Şema çalışma kayıtları alınmadı."
+                )
+            )
+            let safetyModel = makeAdvancedModel(
+                safetySource,
+                initialModule: .wifiSync
+            )
+            await safetyModel.reloadWorkspace()
+            assertLayoutSmoke(
+                AdvancedWorkspaceView(model: safetyModel)
+                    .environment(\.dynamicTypeSize, .accessibility3),
+                size: size,
+                scenario: "Wi-Fi clinical safety pause"
+            )
         }
     }
 
@@ -461,4 +483,5 @@ private actor ResponsiveDivanDataSource: DivanUIDataSource {
     func settingsSummary() async throws -> DivanSettingsSummary { settings }
     func saveSettings(_ input: DivanSettingsInput) async throws -> DivanSettingsSummary { settings }
     func clearAPIKey(provider: DivanProviderID) async throws -> DivanSettingsSummary { settings }
+    func scanLocalModels() async throws -> [DivanLocalServer] { [] }
 }

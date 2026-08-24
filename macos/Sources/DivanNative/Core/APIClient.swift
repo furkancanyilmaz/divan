@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 final class LoopbackRedirectDelegate: NSObject, URLSessionTaskDelegate,
     @unchecked Sendable {
@@ -45,6 +46,7 @@ final class LoopbackRedirectDelegate: NSObject, URLSessionTaskDelegate,
 public actor APIClient: DivanService {
     private static let maximumJSONBytes = 64 * 1024 * 1024
     private static let maximumPortraitBytes = 10 * 1024 * 1024
+    private static let maximumImageryCardBytes = 500 * 1024
     private static let maximumSSELineBytes = 2 * 1024 * 1024
     private static let acceptedPortraitMIMETypes = Set([
         "image/jpeg", "image/png", "image/webp",
@@ -108,6 +110,7 @@ public actor APIClient: DivanService {
                 pinSet: response.settings.pinSet ?? false,
                 retentionDays: response.settings.retentionDays ?? 0,
                 simpleMode: response.settings.simpleMode ?? false,
+                guestMode: response.settings.guestMode ?? false,
                 credentialStorage: response.settings.credentialStorage ?? "",
                 appVersion: response.appVersion
             )
@@ -218,6 +221,96 @@ public actor APIClient: DivanService {
             throw DivanAPIError(
                 message: "Portre dosyası boş.",
                 errorCode: "empty_portrait"
+            )
+        }
+        return data
+    }
+
+    /// Loads one allowlisted visual free-association card through the same
+    /// authenticated loopback session used by the API.
+    ///
+    /// A card can never redirect or resolve outside the runtime origin. The
+    /// manifest-provided byte count and digest are rechecked after transport,
+    /// so malformed or substituted image data fails closed in the native UI.
+    public func freudImageryCardData(
+        card: FreudImageryCard
+    ) async throws -> Data {
+        let rawURL = card.url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard rawURL == card.url,
+              let url = URL(string: rawURL, relativeTo: baseURL)?.absoluteURL,
+              Self.isSameOrigin(url, baseURL),
+              url.user == nil,
+              url.password == nil,
+              url.fragment == nil,
+              Self.hasAllowedImageryQuery(url),
+              Self.hasAllowedImageryPath(url, expectedFile: card.file),
+              card.mime == "image/webp",
+              (1...Self.maximumImageryCardBytes).contains(card.bytes),
+              card.sha256.count == 64 else {
+            throw DivanAPIError(
+                message: "Görsel kart adresi güvenli değil.",
+                errorCode: "invalid_imagery_url"
+            )
+        }
+        try await ensureSessionBootstrap()
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 30
+        request.setValue("image/webp", forHTTPHeaderField: "Accept")
+
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse,
+              let responseURL = http.url,
+              Self.isSameOrigin(responseURL, baseURL),
+              Self.hasAllowedImageryQuery(responseURL),
+              Self.hasAllowedImageryPath(responseURL, expectedFile: card.file) else {
+            throw DivanAPIError.invalidEndpoint
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw DivanAPIError(
+                message: "Görsel kart yüklenemedi.",
+                statusCode: http.statusCode,
+                errorCode: "imagery_load_failed"
+            )
+        }
+        let mime = (http.value(forHTTPHeaderField: "Content-Type") ?? "")
+            .split(separator: ";", maxSplits: 1)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        guard mime == "image/webp" else {
+            throw DivanAPIError(
+                message: "Görsel kart dosya türü desteklenmiyor.",
+                errorCode: "invalid_imagery_type"
+            )
+        }
+        guard http.expectedContentLength <= Int64(Self.maximumImageryCardBytes),
+              http.expectedContentLength <= 0
+                || http.expectedContentLength == Int64(card.bytes) else {
+            throw DivanAPIError(
+                message: "Görsel kart beklenmeyen boyutta.",
+                errorCode: "imagery_size_mismatch"
+            )
+        }
+        var data = Data()
+        data.reserveCapacity(card.bytes)
+        for try await byte in bytes {
+            guard data.count < Self.maximumImageryCardBytes else {
+                throw DivanAPIError(
+                    message: "Görsel kart beklenenden büyük.",
+                    errorCode: "imagery_too_large"
+                )
+            }
+            data.append(byte)
+        }
+        guard data.count == card.bytes,
+              Self.isBoundedWebP(data),
+              SHA256.hash(data: data).map({ String(format: "%02x", $0) })
+                .joined() == card.sha256 else {
+            throw DivanAPIError(
+                message: "Görsel kart bütünlüğü doğrulanamadı.",
+                errorCode: "imagery_integrity_failed"
             )
         }
         return data
@@ -344,14 +437,32 @@ public actor APIClient: DivanService {
             pinSet: response.pinSet ?? false,
             retentionDays: response.retentionDays ?? 0,
             simpleMode: response.simpleMode ?? false,
+            guestMode: response.guestMode ?? false,
             credentialStorage: response.credentialStorage ?? "",
             appVersion: response.version ?? ""
         )
     }
 
+    public func setGuestMode(_ active: Bool) async throws -> PublicSettings {
+        let response: GuestModeResponse = try await post(
+            "/api/guest-mode",
+            body: ["active": .bool(active)]
+        )
+        guard response.ok == true, response.guestMode == active else {
+            throw DivanAPIError(
+                message: "Misafir modu değiştirilemedi.",
+                errorCode: "guest_mode_failed"
+            )
+        }
+        cachedBootstrap = nil
+        return try await settings()
+    }
+
     public func saveSettings(_ update: ProviderSettingsUpdate) async throws -> PublicSettings {
         let provider = update.providerID?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let allowedProviders = Set(["deepseek", "openai", "anthropic", "lmstudio"])
+        let allowedProviders = Set([
+            "deepseek", "openai", "anthropic", "gemini", "lmstudio", "ollama",
+        ])
         if let provider, !allowedProviders.contains(provider) {
             throw DivanAPIError(
                 message: "Model sağlayıcısı geçersiz.",
@@ -370,8 +481,10 @@ public actor APIClient: DivanService {
             }
             body["\(provider)_model"] = .string(model)
         }
-        if let baseURL = update.localBaseURL?.trimmingCharacters(in: .whitespacesAndNewlines) {
-            body["lmstudio_base_url"] = .string(baseURL)
+        if let baseURL = update.localBaseURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let provider,
+           ["lmstudio", "ollama"].contains(provider) {
+            body["\(provider)_base_url"] = .string(baseURL)
         }
         if let apiKey = update.apiKey, !apiKey.isEmpty {
             guard let provider else {
@@ -408,10 +521,33 @@ public actor APIClient: DivanService {
         return try await settings()
     }
 
+    func scanLocalModels() async throws -> [LocalServerPayload] {
+        let response: LocalModelsResponse = try await post(
+            "/api/provider/models",
+            body: ["scan_all": .bool(true)],
+            timeout: 20
+        )
+        return response.servers ?? []
+    }
+
     public func sendMessage(
         conversationID: Int,
         text: String,
         replyTo: Int? = nil
+    ) async throws -> AsyncThrowingStream<ChatEvent, Error> {
+        try await sendMessage(
+            conversationID: conversationID,
+            text: text,
+            replyTo: replyTo,
+            schemaBinding: nil
+        )
+    }
+
+    public func sendMessage(
+        conversationID: Int,
+        text: String,
+        replyTo: Int? = nil,
+        schemaBinding: SchemaChatBinding?
     ) async throws -> AsyncThrowingStream<ChatEvent, Error> {
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard conversationID > 0, !cleanText.isEmpty else {
@@ -425,6 +561,148 @@ public actor APIClient: DivanService {
             "request_id": .string(requestID),
         ]
         if let replyTo { body["reply_to"] = .number(Double(replyTo)) }
+        if let binding = schemaBinding {
+            guard binding.pathId > 0, !binding.stepId.isEmpty,
+                  binding.expectedRevision >= 0,
+                  SchemaPathCheckpoint.isPublicID(binding.pathPublicId),
+                  SchemaPathCheckpoint.isPublicID(
+                    binding.checkpointPublicId
+                  ),
+                  binding.expectedCheckpointSeq >= 0,
+                  binding.sourceUserMessageId > 0,
+                  SchemaPathCheckpoint.isPublicID(
+                    binding.sourceUserMessagePublicId
+                  ),
+                  binding.sourceAssistantMessageId > 0,
+                  SchemaPathCheckpoint.isPublicID(
+                    binding.sourceAssistantMessagePublicId
+                  ) else {
+                throw DivanAPIError(
+                    message: "Şema çalışma adımı güncel değil.",
+                    errorCode: "schema_step_mismatch"
+                )
+            }
+            let techniqueIdentity = (
+                binding.techniqueLinkId,
+                binding.techniqueLinkPublicId,
+                binding.expectedTechniqueRevision
+            )
+            switch binding.`protocol` {
+            case "schema_path_chat_v4":
+                guard binding.promptRequestId == nil,
+                      binding.promptAssistantMessageId == nil,
+                      binding.promptAssistantMessagePublicId == nil else {
+                    throw DivanAPIError(
+                        message: "Şema çalışma adımı güncel değil.",
+                        errorCode: "schema_step_mismatch"
+                    )
+                }
+                switch techniqueIdentity {
+                case (nil, nil, nil):
+                    break
+                case let (linkID?, publicID?, revision?)
+                    where linkID > 0
+                        && SchemaPathCheckpoint.isPublicID(publicID)
+                        && revision >= 0:
+                    break
+                default:
+                    throw DivanAPIError(
+                        message: "Şema teknik bağlantısı güncel değil.",
+                        errorCode: "schema_step_mismatch"
+                    )
+                }
+            case "schema_path_chat_v5":
+                let importControl = binding.syncImportControl == true
+                let deliveredPrompt = binding.syncImportControl == nil
+                    && binding.promptRequestId.map(
+                        SchemaPromptDelivery.isRequestID
+                    ) == true
+                    && binding.promptAssistantMessageId.map { $0 > 0 }
+                        == true
+                    && binding.promptAssistantMessageId
+                        == binding.sourceAssistantMessageId
+                    && binding.promptAssistantMessagePublicId.map(
+                        SchemaPathCheckpoint.isPublicID
+                    ) == true
+                    && binding.promptAssistantMessagePublicId
+                        == binding.sourceAssistantMessagePublicId
+                let importedBoundary = importControl
+                    && binding.promptRequestId == nil
+                    && binding.promptAssistantMessageId == nil
+                    && binding.promptAssistantMessagePublicId == nil
+                guard (deliveredPrompt || importedBoundary),
+                      techniqueIdentity.0 == nil,
+                      techniqueIdentity.1 == nil,
+                      techniqueIdentity.2 == nil else {
+                    throw DivanAPIError(
+                        message: "Şema sorusu henüz konuşmaya ulaşmadı.",
+                        errorCode: "schema_prompt_delivery_incomplete"
+                    )
+                }
+            default:
+                throw DivanAPIError(
+                    message: "Şema çalışma adımı güncel değil.",
+                    errorCode: "schema_step_mismatch"
+                )
+            }
+            var value: [String: JSONValue] = [
+                "protocol": .string(binding.`protocol`),
+                "path_id": .number(Double(binding.pathId)),
+                "path_public_id": .string(binding.pathPublicId),
+                "step_id": .string(binding.stepId),
+                "expected_revision": .number(Double(binding.expectedRevision)),
+                "checkpoint_public_id": .string(
+                    binding.checkpointPublicId
+                ),
+                "expected_checkpoint_seq": .number(
+                    Double(binding.expectedCheckpointSeq)
+                ),
+                "source_user_message_id": .number(
+                    Double(binding.sourceUserMessageId)
+                ),
+                "source_user_message_public_id": .string(
+                    binding.sourceUserMessagePublicId
+                ),
+                "source_assistant_message_id": .number(
+                    Double(binding.sourceAssistantMessageId)
+                ),
+                "source_assistant_message_public_id": .string(
+                    binding.sourceAssistantMessagePublicId
+                ),
+            ]
+            if binding.syncImportControl == true {
+                value["sync_import_control"] = .bool(true)
+                // Explicit nulls distinguish this receiver-only control
+                // boundary from a malformed delivered-prompt binding.
+                value["prompt_request_id"] = .null
+                value["prompt_assistant_message_id"] = .null
+                value["prompt_assistant_message_public_id"] = .null
+            }
+            if let requestID = binding.promptRequestId {
+                value["prompt_request_id"] = .string(requestID)
+            }
+            if let messageID = binding.promptAssistantMessageId {
+                value["prompt_assistant_message_id"] = .number(
+                    Double(messageID)
+                )
+            }
+            if let publicID = binding.promptAssistantMessagePublicId {
+                value["prompt_assistant_message_public_id"] = .string(
+                    publicID
+                )
+            }
+            if let linkID = binding.techniqueLinkId {
+                value["technique_link_id"] = .number(Double(linkID))
+            }
+            if let publicID = binding.techniqueLinkPublicId,
+               !publicID.isEmpty {
+                value["technique_link_public_id"] = .string(publicID)
+            }
+            if let revision = binding.expectedTechniqueRevision {
+                value["expected_technique_revision"] = .number(Double(revision))
+            }
+            body["schema_binding"] = .object(value)
+        }
         var request = try makeRequest(path: "/api/chat", method: "POST", body: body)
         request.setValue(
             "text/event-stream, application/json;q=0.9",
@@ -951,13 +1229,26 @@ public actor APIClient: DivanService {
     }
 
     private func mapMessage(_ payload: MessagePayload) -> MessageRecord {
-        MessageRecord(
+        let technique = payload.technique.flatMap { name -> MessageTechniqueMetadata? in
+            let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty else { return nil }
+            return MessageTechniqueMetadata(
+                name: clean,
+                phase: payload.techniquePhase,
+                rationale: payload.techniqueRationale
+            )
+        }
+        return MessageRecord(
             id: payload.id,
+            publicID: payload.publicId,
             role: payload.role ?? "assistant",
             content: payload.content ?? "",
             createdAt: payload.created ?? "",
             replyTo: payload.replyTo,
-            deliveryStatus: payload.deliveryStatus
+            deliveryStatus: payload.deliveryStatus,
+            technique: technique,
+            metaEvents: payload.metaEvents ?? [],
+            schemaBindingResult: payload.schemaBindingResult
         )
     }
 
@@ -975,12 +1266,15 @@ public actor APIClient: DivanService {
             model: payload.model ?? "",
             content: payload.content ?? "",
             errorCode: payload.errorCode ?? "",
+            schemaPromptProtocol: payload.schemaPromptProtocol ?? "",
+            schemaPromptIntent: payload.schemaPromptIntent ?? "",
             attempt: payload.attempt ?? 0,
             maxAttempts: payload.maxAttempts ?? 1,
             automaticRetry: payload.automaticRetry ?? false,
             pending: payload.pending ?? false,
             waitingForProvider: payload.waitingForProvider ?? false,
-            nextRetryAt: payload.nextRetryAt
+            nextRetryAt: payload.nextRetryAt,
+            schemaBindingResult: payload.schemaBindingResult
         )
     }
 
@@ -996,7 +1290,22 @@ public actor APIClient: DivanService {
             assistantMessageID: payload.assistantMessageId,
             code: payload.code,
             attempt: payload.attempt,
-            maxAttempts: payload.maxAttempts
+            maxAttempts: payload.maxAttempts,
+            technique: payload.technique.flatMap { name in
+                let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !clean.isEmpty else { return nil }
+                return MessageTechniqueMetadata(
+                    name: clean,
+                    phase: payload.techniquePhase,
+                    rationale: payload.techniqueRationale
+                )
+            },
+            messageMeta: payload.messageMeta ?? [],
+            nextCard: payload.nextCard,
+            schemaPath: payload.schemaPath,
+            interactionPolicy: payload.interactionPolicy,
+            resumeState: payload.resumeState,
+            schemaBindingResult: payload.schemaBindingResult
         )
     }
 
@@ -1051,6 +1360,38 @@ public actor APIClient: DivanService {
         return url.path.isEmpty || url.path == "/"
     }
 
+    private static func isValidSchemaBindingJSON(
+        _ value: JSONValue,
+        depth: Int
+    ) -> Bool {
+        guard depth <= 4 else { return false }
+        switch value {
+        case .string(let text):
+            return text.count <= 2_000 && !text.unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0)
+                    && $0 != "\n" && $0 != "\t"
+            }
+        case .number(let number):
+            return number.isFinite
+        case .bool, .null:
+            return true
+        case .object(let object):
+            return object.count <= 32 && object.allSatisfy { key, child in
+                !key.isEmpty && key.count <= 80
+                    && key.unicodeScalars.allSatisfy {
+                        CharacterSet.alphanumerics
+                            .union(CharacterSet(charactersIn: "_-"))
+                            .contains($0)
+                    }
+                    && isValidSchemaBindingJSON(child, depth: depth + 1)
+            }
+        case .array(let array):
+            return array.count <= 32 && array.allSatisfy {
+                isValidSchemaBindingJSON($0, depth: depth + 1)
+            }
+        }
+    }
+
     private static func isSameOrigin(_ candidate: URL?, _ origin: URL) -> Bool {
         guard let candidate else { return false }
         return candidate.scheme?.lowercased() == origin.scheme?.lowercased()
@@ -1085,5 +1426,49 @@ public actor APIClient: DivanService {
                 .union(CharacterSet(charactersIn: "._-"))
                 .contains($0)
         }
+    }
+
+    private static func hasAllowedImageryQuery(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let items = components.queryItems,
+              items.count == 1,
+              items[0].name == "v",
+              let version = items[0].value,
+              !version.isEmpty else { return false }
+        return version.unicodeScalars.allSatisfy {
+            CharacterSet(charactersIn: "0123456789.").contains($0)
+        }
+    }
+
+    private static func hasAllowedImageryPath(
+        _ url: URL,
+        expectedFile: String
+    ) -> Bool {
+        let prefix = "/assets/imagery/"
+        guard url.path.hasPrefix(prefix) else { return false }
+        let file = String(url.path.dropFirst(prefix.count))
+        guard file == expectedFile,
+              !file.isEmpty,
+              !file.contains("/"),
+              !file.contains(".."),
+              (file as NSString).pathExtension.lowercased() == "webp" else {
+            return false
+        }
+        return file.unicodeScalars.allSatisfy {
+            CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-.webp")
+                .contains($0)
+        }
+    }
+
+    private static func isBoundedWebP(_ data: Data) -> Bool {
+        guard data.count >= 20 else { return false }
+        let header = Array(data.prefix(20))
+        guard Array(header[0..<4]) == Array("RIFF".utf8),
+              Array(header[8..<12]) == Array("WEBP".utf8) else { return false }
+        let declared = Int(header[4])
+            | Int(header[5]) << 8
+            | Int(header[6]) << 16
+            | Int(header[7]) << 24
+        return declared + 8 == data.count
     }
 }

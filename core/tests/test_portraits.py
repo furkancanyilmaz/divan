@@ -170,3 +170,13 @@ class PortraitInterfaceSourceTests(HTTPTestCase):
             'cp -p "$f" assets/portraits/',
             updater,
         )
+
+    def test_desktop_updater_validates_and_replaces_freud_imagery_deck(self):
+        updater = Path(
+            PROJECT_DIR, "Guncelle.command").read_text(encoding="utf-8")
+
+        self.assertIn(r"assets\/imagery\/manifest\.json", updater)
+        self.assertIn('manifest.get("card_count") != 24', updater)
+        self.assertIn('hashlib.sha256(data).hexdigest()', updater)
+        self.assertIn('rm -rf assets/imagery', updater)
+        self.assertIn('cp -R "$TMP/assets/imagery" assets/imagery', updater)

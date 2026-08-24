@@ -901,6 +901,28 @@ public struct SyncSummary: Codable, Equatable, Sendable {
     public let sent: Int
     public let received: Int
     public let conflicts: Int
+    public let clinicalConfirmationRequired: Bool
+    public let clinicalSafetyPause: Bool
+    public let clinicalSafetyDevice: String?
+    public let clinicalSafetyMessage: String?
+
+    public init(
+        sent: Int,
+        received: Int,
+        conflicts: Int,
+        clinicalConfirmationRequired: Bool = false,
+        clinicalSafetyPause: Bool = false,
+        clinicalSafetyDevice: String? = nil,
+        clinicalSafetyMessage: String? = nil
+    ) {
+        self.sent = sent
+        self.received = received
+        self.conflicts = conflicts
+        self.clinicalConfirmationRequired = clinicalConfirmationRequired
+        self.clinicalSafetyPause = clinicalSafetyPause
+        self.clinicalSafetyDevice = clinicalSafetyDevice
+        self.clinicalSafetyMessage = clinicalSafetyMessage
+    }
 }
 
 public struct SyncConflict: Identifiable, Codable, Equatable, Sendable {
@@ -920,6 +942,11 @@ public struct DeviceSyncStatus: Codable, Equatable, Sendable {
     public let lastPeerName: String?
     public let lastSummary: SyncSummary
     public let conflicts: [SyncConflict]
+    public let pendingClinicalConfirmationConversationIDs: [Int]
+    public let pendingClinicalConfirmationCount: Int
+    public let clinicalSafetyPause: Bool
+    public let clinicalSafetyDevice: String?
+    public let clinicalSafetyMessage: String?
     public let scope: [String]
     public let secretsExcluded: Bool
 }
@@ -939,6 +966,15 @@ public struct DeviceSyncApplyResult: Codable, Equatable, Sendable {
     public let summary: SyncSummary
     public let lastSyncAt: String
     public let conflicts: [SyncConflict]
+    public let exactEqual: Bool
+    public let clinicalConfirmationRequired: Bool
+    public let clinicalConfirmationDevice: String?
+    public let clinicalConfirmationMessage: String?
+    public let pendingClinicalConfirmationConversationIDs: [Int]
+    public let pendingClinicalConfirmationCount: Int
+    public let clinicalSafetyPause: Bool
+    public let clinicalSafetyDevice: String?
+    public let clinicalSafetyMessage: String?
 }
 
 public enum SyncConflictResolution: String, Codable, CaseIterable, Sendable {

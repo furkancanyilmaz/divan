@@ -9,11 +9,13 @@ public struct AdvancedWorkspaceView: View {
     /// Çalışma kullanılamadığında kullanıcıyı konuşmalara geri götüren
     /// isteğe bağlı çıkış. Host uygulama sağlar; bu katman navigasyonu bilmez.
     private let onExit: (() -> Void)?
+    private let structuredDataSource: (any StructuredTherapyDataSource)?
     @Environment(\.divanWindowToolbarProvidesIdentity)
     private var windowToolbarProvidesIdentity
 
     public init(
         dataSource: any AdvancedWorkspaceDataSource,
+        structuredDataSource: (any StructuredTherapyDataSource)? = nil,
         context: AdvancedWorkspaceContext,
         initialModule: AdvancedModule = .chairWork,
         onExit: (() -> Void)? = nil
@@ -22,14 +24,17 @@ public struct AdvancedWorkspaceView: View {
             wrappedValue: AdvancedWorkspaceViewModel(
                 dataSource: dataSource,
                 context: context,
-                initialModule: initialModule
+                initialModule: initialModule,
+                supportsStructuredTherapy: structuredDataSource != nil
             )
         )
+        self.structuredDataSource = structuredDataSource
         self.onExit = onExit
     }
 
     public init(model: AdvancedWorkspaceViewModel, onExit: (() -> Void)? = nil) {
         _model = StateObject(wrappedValue: model)
+        structuredDataSource = nil
         self.onExit = onExit
     }
 
@@ -165,7 +170,8 @@ public struct AdvancedWorkspaceView: View {
 
     private var visibleModules: [AdvancedModule] {
         AdvancedModule.allCases.filter {
-            $0 == model.selectedModule || model.moduleIsAvailable($0)
+            $0 != .schemaPath
+                && ($0 == model.selectedModule || model.moduleIsAvailable($0))
         }
     }
 
@@ -203,12 +209,40 @@ public struct AdvancedWorkspaceView: View {
             )
         } else {
             switch model.selectedModule {
+            case .adhdSupport, .freudImagery:
+                if let structuredDataSource,
+                   let conversationID = model.context.conversationID {
+                    StructuredTherapyWorkspaceView(
+                        dataSource: structuredDataSource,
+                        conversationID: conversationID,
+                        module: model.selectedModule
+                    )
+                } else {
+                    AdvancedUnavailableState(
+                        title: "Bu yerel çalışma kullanılamıyor",
+                        message: "Güncel ortak terapi çekirdeğiyle yeniden açın.",
+                        nextStep: "Çalışma alanını kapatıp güncel Divan sürümünü yeniden açın.",
+                        accessibilityIdentifier: "structuredUnavailableState",
+                        exitAction: onExit
+                    )
+                }
+            case .schemaPath:
+                AdvancedUnavailableState(
+                    title: "Şema çalışması sohbet içinde",
+                    message: "Kerem Genç ile şema çalışması ayrı bir ekran veya form açmadan konuşmada sürer.",
+                    nextStep: "Konuşmaya dönüp normal mesaj alanından devam edin.",
+                    accessibilityIdentifier: "schemaPathChatOnlyState",
+                    exitAction: onExit
+                )
             case .chairWork:
                 ChairWorkView(model: model)
             case .reparenting:
                 ReparentingImageryView(model: model)
             case .livingMap:
-                LivingMapView(model: model)
+                LivingMapView(
+                    model: model,
+                    schemaAnalysisDataSource: structuredDataSource
+                )
             case .wifiSync:
                 WiFiSyncView(model: model)
             }
@@ -220,6 +254,9 @@ public struct AdvancedWorkspaceView: View {
             return "Bu görüşmede deneyimsel çalışma kapalı"
         }
         return switch module {
+        case .adhdSupport: "ADHD çalışma alanı kullanılamıyor"
+        case .schemaPath: "Şema çalışma yolu kullanılamıyor"
+        case .freudImagery: "Görsel Serbest Çağrışım kullanılamıyor"
         case .chairWork: "Bu ustada sandalye çalışması bulunmuyor"
         case .reparenting: "Bu ustada yeniden ebeveynlik-imgeleme bulunmuyor"
         case .livingMap: "Yaşayan harita kullanılamıyor"
@@ -232,6 +269,12 @@ public struct AdvancedWorkspaceView: View {
             return "Sol listedeki açık terapi seanslarından birini seçin. Açık seans yoksa Ustalar’dan yeni bir terapi seansı başlatın."
         }
         return switch module {
+        case .adhdSupport:
+            "Sol listedeki açık ADHD Koçu görüşmesini seçin."
+        case .schemaPath:
+            "Sol listedeki açık Şema Terapi görüşmesini seçin."
+        case .freudImagery:
+            "Açık Freud ana terapi görüşmesinde Serbest Çağrışım yöntemini seçip onaylayın."
         case .chairWork:
             "Sol listedeki açık seanslardan Perls veya Young gibi sandalye protokolü sunan bir terapisti seçin."
         case .reparenting:
@@ -245,6 +288,9 @@ public struct AdvancedWorkspaceView: View {
 
     private func unavailableIdentifier(for module: AdvancedModule) -> String {
         switch module {
+        case .adhdSupport: "adhdUnavailableState"
+        case .schemaPath: "schemaPathUnavailableState"
+        case .freudImagery: "freudImageryUnavailableState"
         case .chairWork: "chairUnavailableState"
         case .reparenting: "imageryUnavailableState"
         case .livingMap: "livingMapUnavailableState"

@@ -83,13 +83,17 @@ public struct ProviderSettingsView: View {
                         }
                         TextField("Model", text: $model.settingsModel)
                             .accessibilityLabel("Model adı")
-                        if model.settingsProvider == .lmStudio {
-                            TextField("LM Studio adresi", text: $model.settingsBaseURL)
-                                .accessibilityLabel("LM Studio API adresi")
-                                .help("Örnek: http://127.0.0.1:1234/v1")
-                            Text("LM Studio’yu bu Mac’te başlatın ve modeli yükleyin.")
+                        if model.settingsProvider.isLocal {
+                            TextField(
+                                "\(model.settingsProvider.title) adresi",
+                                text: $model.settingsBaseURL
+                            )
+                            .accessibilityLabel("\(model.settingsProvider.title) API adresi")
+                            .help("Örnek: \(model.settingsProvider.defaultBaseURL)")
+                            Text("\(model.settingsProvider.title) sunucusunu bu Mac’te başlatın ve modeli yükleyin. Aşağıdaki tarama ile açık sunucular otomatik algılanır.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         } else {
                             SecureField("Yeni API anahtarı", text: $model.settingsNewAPIKey)
                                 .accessibilityLabel("Yeni \(model.settingsProvider.title) API anahtarı")
@@ -97,6 +101,10 @@ public struct ProviderSettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        Text("Her sağlayıcının modeli, adresi ve anahtarı ayrı ayrı saklanır; sağlayıcılar arasında geçiş yapınca değerleriniz hatırlanır. Seçili sağlayıcı uygulama yeniden açıldığında da korunur.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.top, 6)
 
@@ -113,6 +121,8 @@ public struct ProviderSettingsView: View {
                     }
                     .padding(.top, 10)
                 }
+
+                localServersSection
 
                 if !model.settingsMessage.isEmpty {
                     Text(model.settingsMessage)
@@ -134,6 +144,13 @@ public struct ProviderSettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .font(.callout)
                 }
+
+                Text("Divan \(displayVersion)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .textSelection(.enabled)
+                    .accessibilityLabel("Divan sürümü \(displayVersion)")
             }
             .padding(22)
             .frame(maxWidth: 760, alignment: .leading)
@@ -147,6 +164,98 @@ public struct ProviderSettingsView: View {
                     Label("Ayarları yenile", systemImage: "arrow.clockwise")
                 }
             }
+        }
+        .task {
+            await model.scanLocalServers()
+        }
+    }
+
+    @ViewBuilder
+    private var localServersSection: some View {
+        GroupBox("Bu Mac’teki yerel modeller") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .foregroundStyle(DivanPalette.wine)
+                        .accessibilityHidden(true)
+                    Text("LM Studio, Ollama ve llama.cpp sunucuları otomatik taranır; açık sunucuların modelleri tek dokunuşla seçilir.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if model.isScanningLocalServers {
+                    HStack(spacing: 9) {
+                        ProgressView().controlSize(.small)
+                        Text("Yerel sunucular taranıyor…")
+                    }
+                    .foregroundStyle(.secondary)
+                } else if !model.localScanMessage.isEmpty {
+                    Text(model.localScanMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(model.detectedLocalServers) { server in
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "server.rack")
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            Text(server.label).font(.headline)
+                            Text(server.baseURL)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        if server.models.isEmpty {
+                            Text("Bu sunucuda kullanılabilir sohbet modeli bulunamadı.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(server.models, id: \.self) { modelName in
+                                HStack(spacing: 10) {
+                                    Image(systemName: "cpu")
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityHidden(true)
+                                    Text(modelName)
+                                        .font(.callout.monospaced())
+                                        .textSelection(.enabled)
+                                    Spacer(minLength: 4)
+                                    if server.provider != nil {
+                                        Button("Kullan") {
+                                            Task {
+                                                await model.useDetectedServer(
+                                                    server, model: modelName)
+                                            }
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                        .accessibilityLabel(
+                                            "\(server.label) üzerinde \(modelName) modelini kullan")
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+                    .padding(11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
+                }
+
+                HStack {
+                    Button {
+                        Task { await model.scanLocalServers() }
+                    } label: {
+                        Label("Yeniden tara", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(model.isScanningLocalServers)
+                    Spacer()
+                }
+                .padding(.top, 4)
+            }
+            .padding(.top, 6)
         }
     }
 
@@ -228,14 +337,20 @@ public struct ProviderSettingsView: View {
     }
 
     private var currentChoiceHasStoredKey: Bool {
-        model.settings?.provider == model.settingsProvider &&
-            model.settings?.apiKeyStored == true
+        guard model.settingsProvider.needsAPIKey else { return false }
+        return model.providerConfigs[model.settingsProvider]?.keySet == true
     }
 
     private var settingsMessageColor: Color {
         let lower = model.settingsMessage.localizedLowercase
         return lower.contains("kaydedildi") || lower.contains("kaldırıldı")
             ? .green : .secondary
+    }
+
+    private var displayVersion: String {
+        Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "geliştirme"
     }
 
     private func providerStateIcon(_ state: DivanProviderState) -> String {

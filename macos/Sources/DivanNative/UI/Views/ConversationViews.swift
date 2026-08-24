@@ -332,6 +332,7 @@ public struct NativeChatView: View {
     @State private var selectedStoryMessageIDs = Set<String>()
     @State private var showStoryComposer = false
     @State private var followsLatestMessage = true
+    @State private var schemaTurnPendingConfirmation: DivanMessage?
     @State private var composerFocused = false
     @State private var composerMeasuredHeight: CGFloat = 40
     @FocusState private var sendButtonFocused: Bool
@@ -378,6 +379,29 @@ public struct NativeChatView: View {
             isSelectingStoryMessages = false
             selectedStoryMessageIDs.removeAll()
             followsLatestMessage = true
+            schemaTurnPendingConfirmation = nil
+        }
+        .confirmationDialog(
+            "Bu tamamlanmış mesaj çifti incelensin mi?",
+            isPresented: Binding(
+                get: { schemaTurnPendingConfirmation != nil },
+                set: { if !$0 { schemaTurnPendingConfirmation = nil } }
+            )
+        ) {
+            Button("Şema ve harita için incele") {
+                guard let message = schemaTurnPendingConfirmation else { return }
+                schemaTurnPendingConfirmation = nil
+                Task { await model.analyzeSchemaTurn(message) }
+            }
+            Button("Vazgeç", role: .cancel) {
+                schemaTurnPendingConfirmation = nil
+            }
+        } message: {
+            if let provider = model.schemaPathSnapshot?.turnAnalysis?.provider {
+                Text("Kapsam yalnız seçtiğiniz tamamlanmış kullanıcı–Kerem mesaj çiftidir. Şema olasılığı ve Yaşayan Harita için \(provider.label) · \(provider.model) ile incelenir; \(provider.local ? "sağlayıcı bu cihazda yereldir" : "içerik seçili bulut sağlayıcısına gönderilir").")
+            } else {
+                Text("Kapsam yalnız seçtiğiniz tamamlanmış kullanıcı–Kerem mesaj çiftidir. Sağlayıcı doğrulanamazsa işlem başlamaz.")
+            }
         }
         .confirmationDialog(
             model.selectedConversation?.isArchived == true
@@ -492,7 +516,6 @@ public struct NativeChatView: View {
                         NativeMessageBubble(
                             message: message,
                             masterName: model.selectedMaster?.name ?? "Usta",
-                            portrait: bubblePortrait,
                             outgoingDelivery: outgoingDeliveryState(for: message),
                             selectionEnabled: isSelectingStoryMessages,
                             selected: selectedStoryMessageIDs.contains(message.id),
@@ -502,10 +525,61 @@ public struct NativeChatView: View {
                             },
                             beginSelection: {
                                 beginStorySelection(with: message)
+                            },
+                            canAnalyzeSchemaTurn: model.canAnalyzeSchemaTurn(message),
+                            schemaAnalysisBusy: model.schemaBusyMessageID == message.serverID,
+                            analyzeSchemaTurn: {
+                                schemaTurnPendingConfirmation = message
                             }
                         )
                         .id(message.id)
                         .accessibilityIdentifier("divan.chat.message.\(message.id)")
+                        let metaEvents = model.schemaMetaEvents(for: message)
+                        if !metaEvents.isEmpty {
+                            Group {
+                                if model.usesSchemaChatProtocol {
+                                    NativeSchemaCompactMetaSurface(
+                                        model: model,
+                                        events: metaEvents
+                                    )
+                                } else {
+                                    NativeSchemaMessageMetaSurface(
+                                        model: model,
+                                        events: metaEvents
+                                    )
+                                }
+                            }
+                            .id("schema-meta-\(message.id)")
+                        }
+                        if message.role == .assistant {
+                            if let card = model.schemaCandidatePrompt(
+                                forAssistantMessageID: message.serverID
+                            ) {
+                                NativeSchemaCandidatePromptRow(
+                                    model: model,
+                                    card: card
+                                )
+                                .id("schema-candidate-prompt-\(card.id)")
+                            }
+                        }
+                        let inlineSuggestions = model.schemaInlineSuggestions(
+                            forAssistantMessageID: message.serverID
+                        )
+                        if !model.usesSchemaChatProtocol,
+                           message.role == .assistant,
+                           !inlineSuggestions.isEmpty {
+                            NativeSchemaInlineSuggestionSurface(
+                                model: model,
+                                suggestions: inlineSuggestions
+                            )
+                            .id("schema-inline-\(message.id)")
+                        }
+                    }
+                    if !model.usesSchemaChatOnlyPresentation,
+                       model.isYoungSchemaConversation,
+                       (model.schemaPathSnapshot?.schemaMode?.enabled == true
+                            || model.schemaModeNeedsLocalConfirmation) {
+                        schemaRecommendationSurface
                     }
                 }
                 .padding(.horizontal, 18)
@@ -540,6 +614,110 @@ public struct NativeChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .layoutPriority(1)
         .accessibilityIdentifier("divan.chat.messageList")
+    }
+
+    @ViewBuilder
+    private var schemaRecommendationSurface: some View {
+        if model.schemaModeNeedsLocalConfirmation {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Şema terapisi modu", systemImage: "lock.shield")
+                    .font(.headline)
+                if let provider = model.schemaPathSnapshot?
+                    .turnAnalysis?.provider {
+                    Text("Şema terapisi tercihi açık; bu cihazdaki \(provider.label) · \(provider.model) ile yeni turları incelemek için ayrıca onaylayın.")
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(
+                        provider.local
+                            ? "Bu sağlayıcı bu Mac’te yereldir. Geçmiş mesajlar bu onaya dahil değildir."
+                            : "Yeni tamamlanan mesaj çifti seçili bulut sağlayıcısına gönderilir. Geçmiş mesajlar bu onaya dahil değildir."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    Button("Bu cihazdaki sağlayıcıyla onayla") {
+                        Task { await model.confirmSchemaModeOnThisDevice() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(DivanPalette.wine)
+                    .disabled(model.schemaModeConfirmationBusy)
+                } else {
+                    Text("Şema terapisi tercihi açık, ancak bu cihazda henüz sağlayıcı ve model seçilip onaylanmadı.")
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Şema analizi çalışmıyor; hiçbir mesaj modele gönderilmiyor. Sağlayıcı ve modeli ayarladıktan sonra burada ayrıca onaylayabilirsiniz.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Sağlayıcı ayarlarını aç") {
+                        model.selectDestination(.settings)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier(
+                        "divan.chat.schemaProviderSetup"
+                    )
+                }
+                if !model.schemaStatusText.isEmpty {
+                    Text(model.schemaStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: 680, alignment: .leading)
+            .background(
+                DivanPalette.parchment.opacity(0.42),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(DivanPalette.gold.opacity(0.46))
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("divan.chat.schemaDeviceConfirmation")
+        } else if !model.usesSchemaChatProtocol,
+                  !model.schemaRecommendationCandidates.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(
+                    "Bu anlatımda birlikte bakabileceğiniz çalışma olasılıkları",
+                    systemImage: "scope"
+                )
+                .font(.headline)
+                Text("Bunlar tanı değil, tamamlanmış mesaj çiftindeki sözlere bağlı değişebilir hipotezlerdir. Son karar sizindir.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(model.schemaRecommendationCandidates) { candidate in
+                    NativeSchemaRecommendationCard(model: model, candidate: candidate)
+                }
+                if !model.schemaStatusText.isEmpty {
+                    Text(model.schemaStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: 680, alignment: .leading)
+            .background(DivanPalette.parchment.opacity(0.42), in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(DivanPalette.gold.opacity(0.46))
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("divan.chat.schemaRecommendations")
+        } else if !model.usesSchemaChatProtocol,
+                  model.schemaPathSnapshot?.turnAnalysis?.processing == true {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Tamamlanan mesaj çifti şema ve yaşayan harita için inceleniyor…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .frame(maxWidth: 680, alignment: .leading)
+            .accessibilityElement(children: .combine)
+        }
     }
 
     private var storySelectionBanner: some View {
@@ -690,6 +868,44 @@ public struct NativeChatView: View {
             .background(.bar)
         } else {
             VStack(spacing: 7) {
+                if let binding = model.schemaComposerBinding,
+                   !model.usesSchemaChatOnlyPresentation {
+                    HStack(spacing: 7) {
+                        Image(systemName: "link.circle.fill")
+                            .foregroundStyle(DivanPalette.wine)
+                        Text("Yanıt bu şema adımına bağlı: \(binding.stepId)")
+                            .font(.caption.weight(.medium))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 8)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(
+                        "Mesaj yalnız etkin şema adımına bağlı gönderilecek"
+                    )
+                    .accessibilityIdentifier("divan.chat.schemaComposerBinding")
+                } else if model.schemaComposerLockedByCard,
+                          !model.usesSchemaChatOnlyPresentation {
+                    HStack(spacing: 7) {
+                        Image(systemName: "rectangle.and.hand.point.up.left")
+                        Text(
+                            model.schemaPathSnapshot?.interactionPolicy?
+                                .composerBindingRequired == true
+                                && !model.schemaComposerExpectsTextReply
+                            ? "Bu güvenlik adımını yukarıdaki kart düğmesiyle tamamlayın."
+                            : model.schemaPathSnapshot?.interactionPolicy?
+                                .composerBindingRequired == true
+                                && model.activeSchemaCard?.fields.isEmpty == false
+                            ? "Önce yukarıdaki kartın zorunlu alanlarını tamamlayın."
+                            : "Önce yukarıdaki şema kartından seçim yapın."
+                        )
+                        Spacer()
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("divan.chat.schemaComposerLocked")
+                }
                 if model.canReloadAfterFailedResponse {
                     ViewThatFits(in: .horizontal) {
                         HStack {
@@ -711,7 +927,10 @@ public struct NativeChatView: View {
                             // Yer tutucu, editörün yazı tipini ve sol iç
                             // boşluğunu birebir kullanmalı; farklı olursa
                             // imleç yazının içine girmiş gibi görünüyordu.
-                            Text("Mesajınızı yazın")
+                            Text(model.schemaComposerBinding == nil
+                                 || model.usesSchemaChatOnlyPresentation
+                                 ? "Mesajınızı yazın"
+                                 : "Bu adım için yanıtınızı yazın")
                                 .font(DivanChatComposer.placeholderFont(
                                     for: dynamicTypeSize))
                                 .foregroundStyle(.tertiary)
@@ -724,7 +943,8 @@ public struct NativeChatView: View {
                         }
                         DivanChatComposer(
                             text: $model.composerText,
-                            isEnabled: !model.isLoadingConversation,
+                            isEnabled: !model.isLoadingConversation
+                                && !model.schemaComposerLockedByCard,
                             canSend: model.canSend,
                             isFocused: $composerFocused,
                             onHeightChange: { composerMeasuredHeight = $0 },
@@ -819,6 +1039,18 @@ public struct NativeChatView: View {
                 // yüklendiğinde sunucudan öğrenilir; etiketler bu belirsizliği
                 // gizlemez ve ekranın kendi çıkışı vardır.
                 Button {
+                    model.openAdvancedModule(.adhdSupport)
+                } label: {
+                    Label("ADHD ritimleri ve defter…", systemImage: "checklist")
+                }
+                .disabled(model.selectedConversation?.masterID != "adhd")
+                Button {
+                    model.openAdvancedModule(.freudImagery)
+                } label: {
+                    Label("Görsel Serbest Çağrışım…", systemImage: "photo.on.rectangle.angled")
+                }
+                .disabled(model.selectedConversation?.masterID != "freud")
+                Button {
                     model.openAdvancedModule(.chairWork)
                 } label: {
                     Label("Sandalye çalışması…", systemImage: "chair.lounge")
@@ -896,6 +1128,13 @@ public struct NativeChatView: View {
                     Label("Mesajlardan hikâye oluştur", systemImage: "rectangle.portrait.on.rectangle.portrait")
                 }
                 if model.selectedConversation?.mode == .therapy {
+                    if model.selectedConversation?.masterID == "freud" {
+                        Button {
+                            model.openAdvancedModule(.freudImagery)
+                        } label: {
+                            Label("Görsel Serbest Çağrışım", systemImage: "photo.on.rectangle.angled")
+                        }
+                    }
                     Button {
                         model.openAdvancedModule(.chairWork)
                     } label: {
@@ -957,14 +1196,6 @@ public struct NativeChatView: View {
         message.role != .system && !message.content
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !message.isPending && message.failedDescription == nil
-    }
-
-    /// Seçili ustanın portresi, balon arka planı için bir kez çözülür.
-    private var bubblePortrait: NSImage? {
-        guard let data = model.portraitData(for: model.selectedMaster) else {
-            return nil
-        }
-        return NSImage(data: data)
     }
 
     private func outgoingDeliveryState(
@@ -1097,6 +1328,329 @@ private struct ScrollFollowObserver: NSViewRepresentable {
     }
 }
 
+private struct NativeSchemaCandidatePromptRow: View {
+    @ObservedObject var model: DivanViewModel
+    let card: SchemaCardEnvelope
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                promptText
+                Spacer(minLength: 4)
+                actions
+            }
+            VStack(alignment: .leading, spacing: 7) {
+                promptText
+                actions
+            }
+        }
+        .font(.callout)
+        .padding(.leading, 12)
+        .frame(maxWidth: 680, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("divan.chat.schemaCandidatePrompt")
+    }
+
+    private var promptText: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let quote = card.source.candidateQuoteForDisplay {
+                Text("Üzerinde çalışabileceğimiz konu: ")
+                    .fontWeight(.semibold)
+                + Text("“\(quote)”")
+            }
+            if let pattern = card.candidatePatternForDisplay {
+                Text("Olası örüntü: ")
+                    .fontWeight(.semibold)
+                + Text(pattern)
+            }
+            Text(card.body).fontWeight(.medium)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .privacySensitive()
+    }
+
+    private var actions: some View {
+        HStack(spacing: 6) {
+            ForEach(card.actions) { action in
+                Button(action.label) {
+                    Task {
+                        await model.submitSchemaCard(
+                            card, action: action, fieldValues: [:]
+                        )
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+                .disabled(model.schemaBusyCardID != nil)
+                .accessibilityIdentifier(
+                    "divan.chat.schemaCandidatePrompt.\(action.action)"
+                )
+            }
+            if model.schemaBusyCardID == card.id {
+                ProgressView().controlSize(.small)
+                    .accessibilityLabel("Şema çalışma seçimi kaydediliyor")
+            }
+        }
+    }
+}
+
+private struct NativeSchemaCompactMetaSurface: View {
+    @ObservedObject var model: DivanViewModel
+    let events: [SchemaMessageMetaEvent]
+    @State private var editingPublicID: String?
+    @State private var editText = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(events) { event in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Label(
+                            fallbackTitle(event),
+                            systemImage: event.kind == "map_update"
+                                ? "map" : "wand.and.stars"
+                        )
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        if event.status != "active" {
+                            Text(event.status)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer(minLength: 4)
+                        if !model.usesSchemaChatProtocolV5,
+                           !event.actions.isEmpty {
+                            Menu {
+                                ForEach(event.actions) { action in
+                                    Button(action.label) {
+                                        if action.action
+                                            == SchemaChatCardAction
+                                                .editMapUpdate.rawValue {
+                                            editingPublicID = event.publicId
+                                            editText = ""
+                                        } else {
+                                            Task {
+                                                await model.submitSchemaMetaAction(
+                                                    event: event,
+                                                    action: action
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+                            .accessibilityLabel("\(event.title) seçenekleri")
+                        }
+                    }
+                    if !model.usesSchemaChatProtocolV5,
+                       editingPublicID == event.publicId,
+                       let editAction = event.actions.first(where: {
+                           $0.action == SchemaChatCardAction.editMapUpdate.rawValue
+                       }) {
+                        HStack(spacing: 6) {
+                            TextField("Harita notunu düzelt", text: $editText)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Kaydet") {
+                                Task {
+                                    await model.submitSchemaMetaAction(
+                                        event: event,
+                                        action: editAction,
+                                        note: editText
+                                    )
+                                    editingPublicID = nil
+                                    editText = ""
+                                }
+                            }
+                            .disabled(
+                                editText.trimmingCharacters(
+                                    in: .whitespacesAndNewlines
+                                ).isEmpty
+                            )
+                            Button("Vazgeç") {
+                                editingPublicID = nil
+                                editText = ""
+                            }
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(
+                    [event.title, event.summary]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: ". ")
+                )
+                .accessibilityIdentifier(
+                    "divan.chat.schemaCompactMeta.\(event.publicId)"
+                )
+            }
+        }
+        .padding(.leading, 12)
+        .frame(maxWidth: 680, alignment: .leading)
+    }
+
+    private func fallbackTitle(_ event: SchemaMessageMetaEvent) -> String {
+        event.kind == "map_update" ? "Yaşayan Harita" : "Teknik"
+    }
+}
+
+private struct NativeSchemaMessageMetaSurface: View {
+    @ObservedObject var model: DivanViewModel
+    let events: [SchemaMessageMetaEvent]
+    @State private var editNotes: [String: String] = [:]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(events) { event in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 7) {
+                        Image(systemName: event.kind == "map_update"
+                              ? "map" : "point.3.connected.trianglepath.dotted")
+                            .foregroundStyle(DivanPalette.gold)
+                        Text(event.title).font(.callout.weight(.semibold))
+                        Spacer()
+                        if event.status != "active" {
+                            Text(statusLabel(event.status))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(event.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .privacySensitive()
+                    if ["active", "private"].contains(event.status) {
+                        ForEach(event.actions) { action in
+                            if action.action == SchemaChatCardAction.editMapUpdate.rawValue {
+                                TextField(
+                                    "Düzeltilmiş not",
+                                    text: Binding(
+                                        get: { editNotes[event.publicId] ?? "" },
+                                        set: { editNotes[event.publicId] = $0 }
+                                    )
+                                )
+                                .textFieldStyle(.roundedBorder)
+                            }
+                            Button(action.label) {
+                                Task {
+                                    await model.submitSchemaMetaAction(
+                                        event: event,
+                                        action: action,
+                                        note: editNotes[event.publicId]
+                                    )
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(model.schemaBusyCardID != nil)
+                            .accessibilityIdentifier(
+                                "divan.chat.schemaMeta.action.\(action.id)"
+                            )
+                        }
+                    }
+                }
+                .padding(10)
+                .background(.quaternary.opacity(0.34), in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("divan.chat.schemaMeta.\(event.publicId)")
+            }
+        }
+        .frame(maxWidth: 680, alignment: .leading)
+    }
+
+    private func statusLabel(_ status: String) -> String {
+        switch status {
+        case "undone": "geri alındı"
+        case "private": "özel"
+        case "invalidated": "geçersizleşti"
+        default: status
+        }
+    }
+}
+
+private struct NativeSchemaInlineSuggestionSurface: View {
+    @ObservedObject var model: DivanViewModel
+    let suggestions: [SchemaInlineSuggestion]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Bu anda hangi mod öne çıkıyor?", systemImage: "scope")
+                .font(.callout.weight(.semibold))
+            Text("Bunlar tanı veya kişilik etiketi değil; yalnız bu anlatıma bağlı, değişebilir çalışma olasılıklarıdır.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(suggestions) { suggestion in
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(suggestion.label)
+                        .font(.callout.weight(.semibold))
+                    if !suggestion.evidence.isEmpty {
+                        Text("Sizin sözünüz: “\(suggestion.evidence)”")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .privacySensitive()
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if !suggestion.question.isEmpty {
+                        Text(suggestion.question)
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack { actions(suggestion) }
+                        VStack(alignment: .leading) { actions(suggestion) }
+                    }
+                }
+                .padding(10)
+                .background(.background.opacity(0.8), in: RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: 680, alignment: .leading)
+        .background(DivanPalette.parchment.opacity(0.36), in: RoundedRectangle(cornerRadius: 13))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13)
+                .stroke(DivanPalette.gold.opacity(0.42))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("divan.chat.schemaInlineSuggestions")
+    }
+
+    @ViewBuilder
+    private func actions(_ suggestion: SchemaInlineSuggestion) -> some View {
+        Button("Birlikte değerlendirelim") {
+            Task {
+                await model.resolveSchemaInlineSuggestion(
+                    suggestion, accept: true
+                )
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(DivanPalette.wine)
+        .disabled(model.schemaBusySuggestionID != nil)
+        Button("Şimdi değil") {
+            Task {
+                await model.resolveSchemaInlineSuggestion(
+                    suggestion, accept: false
+                )
+            }
+        }
+        .buttonStyle(.bordered)
+        .disabled(model.schemaBusySuggestionID != nil)
+        if model.schemaBusySuggestionID == suggestion.id {
+            ProgressView().controlSize(.small)
+                .accessibilityLabel("Mod seçimi kaydediliyor")
+        }
+    }
+}
+
 private enum NativeOutgoingDeliveryState {
     case sending
     case accepted
@@ -1111,20 +1665,136 @@ private enum NativeOutgoingDeliveryState {
     }
 }
 
+private struct NativeSchemaRecommendationCard: View {
+    @ObservedObject var model: DivanViewModel
+    let candidate: SchemaCandidate
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { labels }
+                VStack(alignment: .leading, spacing: 5) { labels }
+            }
+            Text(candidate.title)
+                .font(.callout.weight(.semibold))
+            Text(candidate.statement)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            if let turn = candidate.sourceTurn {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Mesaj dayanağı")
+                        .font(.caption.weight(.semibold))
+                    Text("Siz: “\(turn.userExcerpt)”")
+                    Text("Kerem: “\(turn.assistantExcerpt)”")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .privacySensitive()
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            if candidate.approvedForPath {
+                Button("Bunu çalışalım") {
+                    Task { await model.startSchemaRecommendation(candidate) }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(DivanPalette.wine)
+                .disabled(
+                    model.schemaPathSnapshot?.activePath != nil
+                        || model.schemaBusyCandidateID != nil
+                )
+            } else if candidate.decisionState == "deferred" {
+                Label("Sonraki görüşmeye bırakıldı", systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 150), spacing: 7)],
+                    alignment: .leading,
+                    spacing: 7
+                ) {
+                    Button("Bana uyuyor") {
+                        Task {
+                            await model.reviewSchemaRecommendation(
+                                candidate, decision: .accept
+                            )
+                        }
+                    }
+                    .tint(DivanPalette.wine)
+                    Button("Sonraki görüşmeye bırak") {
+                        Task {
+                            await model.reviewSchemaRecommendation(
+                                candidate, decision: .defer
+                            )
+                        }
+                    }
+                    Button("Şimdilik değil") {
+                        Task {
+                            await model.reviewSchemaRecommendation(
+                                candidate, decision: .dismiss
+                            )
+                        }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(
+                    model.schemaPathSnapshot?.activePath != nil
+                        || model.schemaBusyCandidateID != nil
+                )
+            }
+            if model.schemaPathSnapshot?.activePath != nil {
+                Label(
+                    "Bu çalışma bitince diğerlerini başka görüşmede ele alacağız.",
+                    systemImage: "tray.full"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            if model.schemaBusyCandidateID == candidate.id {
+                ProgressView().controlSize(.small)
+                    .accessibilityLabel("Şema çalışma seçimi kaydediliyor")
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.opacity(0.78), in: RoundedRectangle(cornerRadius: 11))
+        .overlay {
+            RoundedRectangle(cornerRadius: 11)
+                .stroke(Color(nsColor: .separatorColor))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("divan.chat.schemaCandidate.\(candidate.id)")
+    }
+
+    @ViewBuilder
+    private var labels: some View {
+        if let schema = candidate.schema {
+            Text("Şema: \(schema.label)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(DivanPalette.wine)
+        }
+        if let mode = candidate.mode {
+            Text("Mod: \(mode.label)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 private struct NativeMessageBubble: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let message: DivanMessage
     let masterName: String
-    /// Usta balonunun arkasında beliren portre. Yalnız dekoratiftir; metnin
-    /// okunabilirliğini bozmamak için çok düşük opaklıkta ve yumuşatılmış
-    /// kenarlarla çizilir.
-    var portrait: NSImage?
     let outgoingDelivery: NativeOutgoingDeliveryState?
     let selectionEnabled: Bool
     let selected: Bool
     let selectable: Bool
     let toggleSelection: () -> Void
     let beginSelection: () -> Void
+    let canAnalyzeSchemaTurn: Bool
+    let schemaAnalysisBusy: Bool
+    let analyzeSchemaTurn: () -> Void
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -1143,11 +1813,43 @@ private struct NativeMessageBubble: View {
                         .font(.system(size: messageFontSize))
                         .textSelection(.enabled)
                 }
+                if message.role == .assistant, let technique = message.technique {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label(
+                            [technique.name, technique.phase]
+                                .compactMap { $0 }
+                                .filter { !$0.isEmpty }
+                                .joined(separator: " · "),
+                            systemImage: "wand.and.stars"
+                        )
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(DivanPalette.wine)
+                        if let rationale = technique.rationale,
+                           !rationale.isEmpty {
+                            Text(rationale)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("divan.chat.messageTechnique")
+                }
                 if let failure = message.failedDescription {
                     Label(failure, systemImage: "exclamationmark.circle")
                         .font(.caption)
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if let bindingMessage =
+                    message.schemaBindingResult?.failureMessage {
+                    Label(bindingMessage, systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier(
+                            "divan.chat.schemaBindingResult"
+                        )
                 }
             }
             .padding(.horizontal, 12)
@@ -1159,20 +1861,6 @@ private struct NativeMessageBubble: View {
                             ? DivanPalette.parchment.opacity(0.92)
                             : Color(nsColor: .controlBackgroundColor)
                     )
-                    .overlay {
-                        // Ustanın yüzü balonun içinden hafifçe belirir:
-                        // konuşanın kim olduğunu metni gölgelemeden hatırlatır.
-                        if message.role != .user, let portrait {
-                            Image(nsImage: portrait)
-                                .resizable()
-                                .scaledToFill()
-                                .opacity(0.10)
-                                .blendMode(.luminosity)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                                .allowsHitTesting(false)
-                                .accessibilityHidden(true)
-                        }
-                    }
                     .clipShape(RoundedRectangle(cornerRadius: 16))
             }
             .overlay {
@@ -1203,6 +1891,18 @@ private struct NativeMessageBubble: View {
             if selectable && !selectionEnabled { beginSelection() }
         }
         .contextMenu {
+            if canAnalyzeSchemaTurn {
+                Button(action: analyzeSchemaTurn) {
+                    Label(
+                        schemaAnalysisBusy
+                            ? "Şema ve harita için inceleniyor…"
+                            : "Şema ve harita için incele",
+                        systemImage: "scope"
+                    )
+                }
+                .disabled(schemaAnalysisBusy)
+                Divider()
+            }
             if selectable {
                 Button {
                     if selectionEnabled { toggleSelection() }
@@ -1239,7 +1939,10 @@ private struct NativeMessageBubble: View {
         } else {
             state = ""
         }
-        return [speaker, message.content, time, state]
+        let technique = message.technique.map {
+            "Kullanılan yöntem \($0.name)"
+        } ?? ""
+        return [speaker, message.content, technique, time, state]
             .filter { !$0.isEmpty }.joined(separator: ", ")
     }
 

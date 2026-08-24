@@ -615,7 +615,9 @@ class ProviderTests(HTTPTestCase):
             "deepseek_api_key": "deepseek-secret-value",
             "openai_api_key": "openai-secret-value",
             "anthropic_api_key": "anthropic-secret-value",
+            "gemini_api_key": "gemini-secret-value",
             "lmstudio_api_key": "local-secret-value",
+            "ollama_api_key": "ollama-secret-value",
             "pin_hash": "pin-secret-value",
         }
         for key, value in secrets.items():
@@ -640,6 +642,7 @@ class ProviderTests(HTTPTestCase):
             "deepseek_api_key": "export-deepseek-secret",
             "openai_api_key": "export-openai-secret",
             "anthropic_api_key": "export-anthropic-secret",
+            "gemini_api_key": "export-gemini-secret",
             "lmstudio_api_key": "export-local-secret",
             "pin_hash": app.pin_hash(pin),
         }

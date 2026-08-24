@@ -296,6 +296,8 @@ private actor DisplayPreferencesNoopDataSource: DivanUIDataSource {
         return settings
     }
 
+    func scanLocalModels() async throws -> [DivanLocalServer] { [] }
+
     private var settings: DivanSettingsSummary {
         DivanSettingsSummary(
             provider: .lmStudio,

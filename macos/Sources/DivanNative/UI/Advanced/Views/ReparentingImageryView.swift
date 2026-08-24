@@ -63,7 +63,7 @@ struct ReparentingImageryView: View {
                         AdvancedIntensityControl(
                             title: "Şu anki yoğunluk",
                             value: $model.imageryIntensity,
-                            maximum: model.clinicalIntensityLimit
+                            maximum: model.imageryStartIntensityMaximum
                         )
 
                         TextField("Durma işaretiniz", text: $model.imageryStopSignal)
@@ -79,7 +79,11 @@ struct ReparentingImageryView: View {
                     .padding(.top, 6)
                 }
 
-                GroupBox("Üç ayrı başlangıç onayı") {
+                GroupBox(
+                    model.imageryRequiresPrecheck
+                        ? "Başlangıç ve güvenlik onayları"
+                        : "Üç ayrı başlangıç onayı"
+                ) {
                     VStack(alignment: .leading, spacing: 12) {
                         consentToggle(
                             "Yönelimim açık",
@@ -96,6 +100,28 @@ struct ReparentingImageryView: View {
                             detail: "İmge ve çağrışımların tarihsel bir olayın kanıtı olmadığını biliyorum.",
                             binding: $model.imageryRealityConfirmed
                         )
+                        if model.imageryRequiresPrecheck {
+                            Divider()
+                            consentToggle(
+                                "Uyku ve aşırı etkinleşme açısından netim",
+                                detail: "Bugün belirgin uykusuzluk, taşkınlık veya gerçeklik ayrımını zorlaştıran bir etkinleşme yaşamıyorum.",
+                                binding: $model.imagerySleepActivationClear
+                            )
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text("Gerekirse ulaşabileceğiniz destek var mı?")
+                                    .font(.callout.weight(.semibold))
+                                Picker(
+                                    "Destek erişimi",
+                                    selection: $model.imagerySupportAvailable
+                                ) {
+                                    Text("Var").tag(Optional(true))
+                                    Text("Şu an yok").tag(Optional(false))
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.segmented)
+                                .accessibilityIdentifier("imagerySupportAvailability")
+                            }
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -628,7 +654,9 @@ struct ReparentingImageryView: View {
                 : model.operationDescription
         }
         if !model.imageryConsentComplete {
-            return "Üç başlangıç onayını ayrı ayrı işaretleyin."
+            return model.imageryRequiresPrecheck
+                ? "Başlangıç onaylarını ve yaşantısal güvenlik kontrolünü ayrı ayrı tamamlayın."
+                : "Üç başlangıç onayını ayrı ayrı işaretleyin."
         }
         if model.imageryIntention.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Yaklaşmak istediğiniz ihtiyacı kısa bir cümleyle yazın."

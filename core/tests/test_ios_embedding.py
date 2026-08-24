@@ -144,9 +144,12 @@ class IOSLaunchContractTests(unittest.TestCase):
         self.assertIn("CODE_SIGN_ENTITLEMENTS", config)
         self.assertIn("com.apple.developer.default-data-protection", entitlements)
 
-    def test_bundle_verifier_rejects_missing_portraits_and_blank_app_icon(self):
+    def test_bundle_verifier_rejects_missing_visual_assets_and_blank_app_icon(self):
         self.assertIn("app/assets/portraits/manifest.json", self.verifier)
         self.assertIn("app/assets/portraits/freud.jpg", self.verifier)
+        self.assertIn("app/assets/imagery/manifest.json", self.verifier)
+        self.assertIn("manifest.get(\"card_count\") != 24", self.verifier)
+        self.assertIn("source_data != packaged_data", self.verifier)
         self.assertIn("AppIcon60x60@2x.png", self.verifier)
         self.assertIn("CFBundleIconName", self.verifier)
         self.assertIn("Uygulama simgesi tamamen siyah veya boş.", self.verifier)
@@ -164,30 +167,30 @@ class IOSLaunchContractTests(unittest.TestCase):
         )
 
     def test_ios_release_version_and_output_name_are_consistent(self):
-        self.assertIn("MARKETING_VERSION = 2026.8.10", self.config)
-        self.assertIn("CURRENT_PROJECT_VERSION = 5", self.config)
+        self.assertIn("MARKETING_VERSION = 2026.8.17", self.config)
+        self.assertIn("CURRENT_PROJECT_VERSION = 8", self.config)
         info_plist = (
             self.ios_root / "Divan/Resources/Info.plist"
         ).read_text(encoding="utf-8")
         self.assertIn("$(MARKETING_VERSION)", info_plist)
         self.assertIn("$(CURRENT_PROJECT_VERSION)", info_plist)
-        self.assertIn('RELEASE_LABEL="2026.08.10.2"', self.verifier)
+        self.assertIn('RELEASE_LABEL="2026.08.17.5"', self.verifier)
         self.assertIn(
-            'EXPECTED_MARKETING_VERSION="2026.8.10"',
+            'EXPECTED_MARKETING_VERSION="2026.8.17"',
             self.verifier,
         )
-        self.assertIn('EXPECTED_BUILD_VERSION="5"', self.verifier)
+        self.assertIn('EXPECTED_BUILD_VERSION="8"', self.verifier)
         self.assertIn("CFBundleShortVersionString raw", self.verifier)
         self.assertIn("CFBundleVersion raw", self.verifier)
         self.assertIn(
-            "Divan-iOS-2026.08.10.2-Standalone-Unsigned.ipa",
+            "Divan-iOS-2026.08.17.5-Standalone-Unsigned.ipa",
             self.packager,
         )
-        self.assertIn("Divan **2026.08.10.2**", self.readme)
-        self.assertIn("`2026.8.10` pazarlama sürümü", self.readme)
-        self.assertIn("`5` derleme numarası", self.readme)
+        self.assertIn("Divan **2026.08.17.5**", self.readme)
+        self.assertIn("`2026.8.17` pazarlama sürümü", self.readme)
+        self.assertIn("`7` derleme numarası", self.readme)
 
-    def test_ios_build_guards_exact_common_sources_and_sync_v2(self):
+    def test_ios_build_guards_exact_common_sources_and_sync_v5(self):
         for required in (
                 "server.py", "index.html", "secure_sync_transport.py",
                 "sync_engine.py", "sync_service.py", "sync_qr.py",
@@ -208,7 +211,7 @@ class IOSLaunchContractTests(unittest.TestCase):
 
         source_sync = Path(PROJECT_DIR, "sync_engine.py").read_text(
             encoding="utf-8")
-        self.assertIn("BATCH_VERSION = 2", source_sync)
+        self.assertIn("BATCH_VERSION = 8", source_sync)
 
     def test_ios_build_rejects_databases_and_embedded_keys(self):
         for label, script in (

@@ -19,8 +19,8 @@ class MacOSPackagingSourceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_release_and_server_versions_match(self):
-        self.assertEqual(app.VERSION, "2026.08.13.2")
-        self.assertIn('VERSION="2026.08.13.2"', self.build_script)
+        self.assertEqual(app.VERSION, "2026.08.15.1")
+        self.assertIn('VERSION="2026.08.15.1"', self.build_script)
 
     def test_package_uses_an_explicit_runtime_allowlist(self):
         match = re.search(
@@ -38,6 +38,13 @@ class MacOSPackagingSourceTests(unittest.TestCase):
         })
         self.assertNotIn("freud.db", self.build_script)
         self.assertNotIn("yedekler/", self.build_script)
+        self.assertIn('assets/imagery/manifest.json', self.build_script)
+        self.assertIn('manifest.get("card_count") != 24', self.build_script)
+        self.assertIn(
+            'cp -R "${ROOT_DIR}/assets/imagery" '
+            '"${RESOURCE_DIR}/assets/imagery"',
+            self.build_script,
+        )
 
     def test_launcher_keeps_mutable_data_outside_the_app_bundle(self):
         self.assertIn(".applicationSupportDirectory", self.launcher)

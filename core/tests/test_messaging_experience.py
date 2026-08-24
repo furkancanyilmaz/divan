@@ -103,8 +103,8 @@ class MessagingExperienceSourceTests(unittest.TestCase):
         self.assertIn("openingConversationId!==null", self.html)
         self.assertIn(
             "$('inputBar').setAttribute('aria-busy',"
-            "opening?'true':'false');",
-            self.html,
+            "opening||schemaBusy?'true':'false');",
+            re.sub(r"\s+", "", self.html),
         )
         send = self.function_body("send(", "selectedRadioValue(")
         self.assertIn("if(openingConversationId!==null)", send)
@@ -126,6 +126,37 @@ class MessagingExperienceSourceTests(unittest.TestCase):
         self.assertIn('id="repairSourcePreview"', self.html)
         self.assertIn('id="repairConfirmPartial"', self.html)
         self.assertIn("fit==='partial'?'not_yet'", self.compact)
+
+    def test_carryover_repair_state_never_projects_a_chat_header_banner(self):
+        self.assertNotIn(
+            "Önceki görüşmede yarım kalan bir düzeltme var",
+            self.html,
+        )
+        self.assertIn(
+            '<section id="carryoverRepair" hidden inert aria-hidden="true">',
+            self.html,
+        )
+        renderer = self.function_body(
+            "renderWorkingAgreement(", "showWorkTools(")
+        self.assertIn("$('carryoverRepair').hidden=true;", renderer)
+        self.assertNotIn(
+            "hidden=!sessionWork.carryover_repair",
+            renderer,
+        )
+
+        # The source state and recovery controls are intentionally retained;
+        # this change only suppresses their former top-of-chat projection.
+        apply_work = self.function_body(
+            "applySessionWork(", "loadSessionWork(")
+        self.assertIn(
+            "sessionWork.carryover_repair=carryoverRepair||null",
+            apply_work,
+        )
+        self.assertIn(
+            "openRepairFlow(sessionWork.carryover_repair)",
+            self.html,
+        )
+        self.assertIn("$('carryoverRepairSkip').onclick", self.html)
 
     def test_long_conversations_open_recent_page_and_offer_manual_history(self):
         self.assertIn("const CONVERSATION_PAGE_LIMIT = 80;", self.html)
@@ -256,9 +287,12 @@ class MessagingExperienceSourceTests(unittest.TestCase):
         )
         self.assertIn("next.classList.add('messageActionsOpen')",
                       disclosure)
+        # Pro mod rozeti araç çubuğu olmadan da açılabildiği için
+        # `tools` artık boş olabilir; niyet aynı: açılan balonun araç
+        # çubuğu görünür işaretlenir.
+        self.assertIn("const tools=messageActionTools(next)", disclosure)
         self.assertIn(
-            "messageActionTools(next).setAttribute("
-            "'aria-hidden','false')",
+            "if(tools)tools.setAttribute('aria-hidden','false')",
             disclosure,
         )
         self.assertIn(
@@ -336,7 +370,8 @@ class MessagingExperienceSourceTests(unittest.TestCase):
         self.assertIn('id="scrollToLatestBtn"', self.html)
         self.assertIn("function chatIsNearBottom(", self.html)
         self.assertIn("function markNewResponseBelow(", self.html)
-        self.assertIn("'↓ Yeni yanıta in'", self.html)
+        self.assertIn("'Yeni yanıta in':'En yeniye in'", self.html)
+        self.assertIn('href="#ui-icon-arrow-down"', self.html)
 
     def test_copy_selection_is_not_limited_by_story_export_limits(self):
         toggle = self.function_body(
@@ -678,9 +713,11 @@ class MessagingExperienceSourceTests(unittest.TestCase):
         native = self.function_body(
             "signalNativePendingWork(", "syncChatDeliveriesFromConversationRows(")
         self.assertIn(
-            "Math.max(pendingJobCount(),pendingChatDeliveryCount())",
+            "Math.max(forced,pendingJobCount(),pendingChatDeliveryCount())",
             re.sub(r"\s+", "", native),
         )
+        self.assertIn("functionsignalNativePendingWork(minPending=0)",
+                      re.sub(r"\s+", "", native))
         render_jobs = self.function_body(
             "renderJobsBadge()", "loadJobs(")
         self.assertIn("signalNativePendingWork()", render_jobs)

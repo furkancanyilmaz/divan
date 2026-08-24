@@ -234,7 +234,7 @@ final class RootConversationLayoutTests: XCTestCase {
                     model.appearancePreference = appearance
                     model.columnVisibility = .all
                     switch module {
-                    case .chairWork, .reparenting:
+                    case .adhdSupport, .schemaPath, .freudImagery, .chairWork, .reparenting:
                         model.selectDestination(.works)
                         model.advancedInitialModule = module
                     case .livingMap:
@@ -258,6 +258,9 @@ final class RootConversationLayoutTests: XCTestCase {
                         size: size
                     )
                     await settle(window, cycles: 4)
+                    if module == .chairWork {
+                        await settleUntilActiveChairControls(window)
+                    }
 
                     let scenario = "\(module.shortTitle), \(appearance.title), " +
                         "\(Int(size.width))×\(Int(size.height))"
@@ -432,6 +435,7 @@ final class RootConversationLayoutTests: XCTestCase {
             )
             defer { close(window) }
             await settle(window, cycles: 10)
+            await settleUntilActiveChairControls(window)
 
             let content = try XCTUnwrap(window.contentView)
             XCTAssertTrue(
@@ -707,6 +711,30 @@ final class RootConversationLayoutTests: XCTestCase {
         }
     }
 
+    /// SwiftUI installs TextEditor/ScrollView AppKit descendants after the
+    /// workspace's async snapshot arrives. Under a loaded full test suite that
+    /// can take longer than a fixed handful of run-loop turns, so wait for the
+    /// actual active-chair surface instead of asserting against a loading frame.
+    private func settleUntilActiveChairControls(_ window: NSWindow) async {
+        for _ in 0..<40 {
+            window.contentView?.layoutSubtreeIfNeeded()
+            if let content = window.contentView {
+                let descendants = viewDescendants(from: content)
+                let hasEditor = descendants.contains {
+                    guard let text = $0 as? NSTextView else { return false }
+                    return text.isEditable && text.frame.width > 80
+                        && text.frame.height > 30
+                }
+                let hasHorizontalSelector = descendants.contains {
+                    ($0 as? NSScrollView)?.hasHorizontalScroller == true
+                }
+                if hasEditor && hasHorizontalSelector { return }
+            }
+            try? await Task.sleep(for: .milliseconds(35))
+            await Task.yield()
+        }
+    }
+
     private func close(_ window: NSWindow) {
         window.orderOut(nil)
         window.close()
@@ -808,6 +836,62 @@ final class RootConversationLayoutTests: XCTestCase {
         }
     }
 
+    func testSchemaChatOnlyKeepsDeepWorkInsideOrdinaryConversation() throws {
+        let conversationSource = try productSource("ConversationViews.swift")
+        for required in [
+            "NativeSchemaCandidatePromptRow",
+            "NativeSchemaCompactMetaSurface",
+            "divan.chat.schemaCandidatePrompt",
+            "ViewThatFits(in: .horizontal)",
+        ] {
+            XCTAssertTrue(
+                conversationSource.contains(required),
+                "Sohbet-içi şema yüzeyi eksik: \(required)"
+            )
+        }
+        for forbidden in [
+            "NativeSchemaInlineCard",
+            "model.openAdvancedModule(.schemaPath)",
+            "divan.chat.schemaCard.field",
+            "divan.chat.schemaCard.action",
+            "schemaPath.workspace.readOnly",
+            "Kart alanlarını tamamlayın",
+            "NativeSchemaChatPromptContinuation",
+            "NativeSchemaSafetyControls",
+            "divan.chat.schemaPromptContinuation",
+            "divan.chat.schemaSafetyControls",
+        ] {
+            XCTAssertFalse(
+                conversationSource.contains(forbidden),
+                "Chat-only yüzey eski kart/workspace öğesi içermemeli: \(forbidden)"
+            )
+        }
+
+        let viewModelSource = try viewModelSource("DivanViewModel.swift")
+        for required in [
+            "usesSchemaChatOnlyPresentation",
+            "schemaCandidatePrompt(",
+            "schemaComposerBinding",
+            "composerSurface == \"ordinary_chat\"",
+            "suppressInFlightSchemaCardProjection",
+        ] {
+            XCTAssertTrue(viewModelSource.contains(required))
+        }
+        XCTAssertFalse(viewModelSource.contains("schemaComposerDraftValues"))
+        XCTAssertFalse(viewModelSource.contains("schemaComposerStepData"))
+
+        let structuredSource = try advancedProductSource(
+            "Views/StructuredTherapyWorkspaceView.swift"
+        )
+        let schemaCase = try XCTUnwrap(
+            structuredSource.range(of: "case .schemaPath:")
+        )
+        let schemaTail = structuredSource[schemaCase.lowerBound...]
+        let nextCase = try XCTUnwrap(schemaTail.range(of: "case .freudImagery:"))
+        XCTAssertTrue(schemaTail[..<nextCase.lowerBound].contains("EmptyView()"))
+        XCTAssertFalse(schemaTail[..<nextCase.lowerBound].contains("Workspace"))
+    }
+
     private func productSource(_ filename: String) throws -> String {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // UI
@@ -832,6 +916,20 @@ final class RootConversationLayoutTests: XCTestCase {
             contentsOf: packageRoot
                 .appendingPathComponent("Sources/DivanNative/UI/Advanced")
                 .appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
+    private func viewModelSource(_ filename: String) throws -> String {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try String(
+            contentsOf: packageRoot
+                .appendingPathComponent("Sources/DivanNative/UI/ViewModels")
+                .appendingPathComponent(filename),
             encoding: .utf8
         )
     }
@@ -1018,4 +1116,5 @@ private actor RootConversationDataSource: DivanUIDataSource {
     func settingsSummary() async throws -> DivanSettingsSummary { settings }
     func saveSettings(_ input: DivanSettingsInput) async throws -> DivanSettingsSummary { settings }
     func clearAPIKey(provider: DivanProviderID) async throws -> DivanSettingsSummary { settings }
+    func scanLocalModels() async throws -> [DivanLocalServer] { [] }
 }

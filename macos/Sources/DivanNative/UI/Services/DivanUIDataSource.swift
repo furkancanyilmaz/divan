@@ -33,13 +33,92 @@ public protocol DivanUIDataSource: Sendable {
 
     func sendMessage(conversationID: Int, text: String) async
         -> AsyncThrowingStream<DivanChatUpdate, Error>
+    func sendMessage(
+        conversationID: Int,
+        text: String,
+        schemaBinding: SchemaChatBinding?
+    ) async -> AsyncThrowingStream<DivanChatUpdate, Error>
     func chatStatus(requestID: String) async throws -> DivanPendingChat
+    func schemaPath(conversationID: Int) async throws -> SchemaPathSnapshot
+    func mutateSchemaPath(
+        _ mutation: SchemaPathMutation
+    ) async throws -> SchemaPathMutationResponse
+    func mutateSchemaCard(
+        _ mutation: SchemaCardMutation
+    ) async throws -> SchemaPathMutationResponse
+    func mutateSchemaClinicalSync(
+        _ mutation: SchemaClinicalSyncMutation
+    ) async throws -> SchemaPathMutationResponse
+    func mutateSchemaTurnAnalysis(
+        _ mutation: SchemaTurnAnalysisMutation
+    ) async throws -> SchemaTurnAnalysisMutationResponse
     func portraitData(url: URL) async throws -> Data
     func settingsSummary() async throws -> DivanSettingsSummary
     func saveSettings(_ input: DivanSettingsInput) async throws
         -> DivanSettingsSummary
     func clearAPIKey(provider: DivanProviderID) async throws
         -> DivanSettingsSummary
+    /// Bu Mac'te açık olan yerel model sunucularını (LM Studio, Ollama,
+    /// llama.cpp) tarar; hiçbiri açık değilse boş liste döner.
+    func scanLocalModels() async throws -> [DivanLocalServer]
+    /// Misafir oturumunu açar/kapatır. Kapatma, sunucuda yalnız misafir
+    /// görüşmelerini siler; normal görüşmelere dokunmaz.
+    func setGuestMode(_ active: Bool) async throws -> DivanSettingsSummary
+}
+
+public extension DivanUIDataSource {
+    func sendMessage(
+        conversationID: Int,
+        text: String,
+        schemaBinding: SchemaChatBinding?
+    ) async -> AsyncThrowingStream<DivanChatUpdate, Error> {
+        await sendMessage(conversationID: conversationID, text: text)
+    }
+
+    func setGuestMode(_ active: Bool) async throws -> DivanSettingsSummary {
+        throw DivanUIClientError(
+            "Misafir modu bu veri kaynağında desteklenmiyor."
+        )
+    }
+
+
+    func schemaPath(conversationID: Int) async throws -> SchemaPathSnapshot {
+        throw DivanUIClientError(
+            "Şema terapisi önerileri bu veri kaynağında desteklenmiyor."
+        )
+    }
+
+    func mutateSchemaPath(
+        _ mutation: SchemaPathMutation
+    ) async throws -> SchemaPathMutationResponse {
+        throw DivanUIClientError(
+            "Şema terapisi önerileri bu veri kaynağında desteklenmiyor."
+        )
+    }
+
+    func mutateSchemaCard(
+        _ mutation: SchemaCardMutation
+    ) async throws -> SchemaPathMutationResponse {
+        throw DivanUIClientError(
+            "Sohbet içi şema adımları bu veri kaynağında desteklenmiyor."
+        )
+    }
+
+    func mutateSchemaClinicalSync(
+        _ mutation: SchemaClinicalSyncMutation
+    ) async throws -> SchemaPathMutationResponse {
+        throw DivanUIClientError(
+            "Şema çalışmalarını eşitleme bu veri kaynağında desteklenmiyor."
+        )
+    }
+
+    func mutateSchemaTurnAnalysis(
+        _ mutation: SchemaTurnAnalysisMutation
+    ) async throws -> SchemaTurnAnalysisMutationResponse {
+        throw DivanUIClientError(
+            "Tamamlanmış mesaj çifti incelemesi bu veri kaynağında desteklenmiyor."
+        )
+    }
 }
 
 public actor DivanPortraitCache {

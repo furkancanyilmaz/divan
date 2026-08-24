@@ -94,7 +94,7 @@ struct ChairWorkView: View {
                         AdvancedIntensityControl(
                             title: "Başlangıç yoğunluğu",
                             value: $model.chairIntensity,
-                            maximum: model.clinicalIntensityLimit
+                            maximum: model.chairStartIntensityMaximum
                         )
                     }
                     .padding(.top, 6)
@@ -118,6 +118,43 @@ struct ChairWorkView: View {
                                 Text("Sözleri ben yazacağım; durma işaretimi kullanabilir, duraklatabilir veya bitirebilirim.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                            }
+                        }
+                        if model.chairRequiresPrecheck {
+                            Divider()
+                            Text("Yaşantısal başlangıç kontrolü")
+                                .font(.callout.weight(.semibold))
+                            Toggle(isOn: $model.chairRealityConfirmed) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Gerçeklik ayrımı açık")
+                                        .font(.callout.weight(.semibold))
+                                    Text("Ortaya çıkan imge ve çağrışımların tarihsel bir olayın kanıtı olmadığını biliyorum.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Toggle(isOn: $model.chairSleepActivationClear) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Uyku ve aşırı etkinleşme açısından netim")
+                                        .font(.callout.weight(.semibold))
+                                    Text("Bugün belirgin uykusuzluk, taşkınlık veya gerçeklik ayrımını zorlaştıran bir etkinleşme yaşamıyorum.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text("Gerekirse ulaşabileceğiniz destek var mı?")
+                                    .font(.callout.weight(.semibold))
+                                Picker(
+                                    "Destek erişimi",
+                                    selection: $model.chairSupportAvailable
+                                ) {
+                                    Text("Var").tag(Optional(true))
+                                    Text("Şu an yok").tag(Optional(false))
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.segmented)
+                                .accessibilityIdentifier("chairSupportAvailability")
                             }
                         }
                     }
@@ -814,7 +851,9 @@ struct ChairWorkView: View {
                 : model.operationDescription
         }
         if !model.chairConsentComplete {
-            return "İki başlangıç onayını ayrı ayrı işaretleyin."
+            return model.chairRequiresPrecheck
+                ? "Başlangıç onaylarını ve yaşantısal güvenlik kontrolünü ayrı ayrı tamamlayın."
+                : "İki başlangıç onayını ayrı ayrı işaretleyin."
         }
         if model.chairGoalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Çalışmanın amacını kısa bir cümleyle yazın."

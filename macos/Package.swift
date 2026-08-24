@@ -22,7 +22,8 @@ let package = Package(
         .testTarget(
             name: "DivanNativeTests",
             dependencies: ["DivanNative"],
-            path: "Tests/DivanNativeTests"
+            path: "Tests/DivanNativeTests",
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

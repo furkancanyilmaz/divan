@@ -1,13 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Divan" parent="@android:style/Theme.Material.NoActionBar">
+    <style name="Theme.DivanBase" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowBackground">@color/divan_background</item>
         <item name="android:colorAccent">@color/divan_gold</item>
         <item name="android:navigationBarColor">@color/divan_background</item>
         <item name="android:statusBarColor">@color/divan_background</item>
-        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowNoTitle">true</item>
+    </style>
+    <style name="Theme.Divan" parent="@style/Theme.DivanBase" />
+    <style name="Theme.Divan.Starting" parent="@style/Theme.Divan">
+        <item name="android:windowBackground">@drawable/divan_launch_screen</item>
+        <item name="android:statusBarColor">@color/divan_launcher_background</item>
+        <item name="android:navigationBarColor">@color/divan_launcher_background</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

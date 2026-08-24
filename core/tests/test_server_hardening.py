@@ -335,6 +335,7 @@ class ServerHardeningTests(HTTPTestCase):
         conv_id = self.conversation(title="Eşitleme durumu")
         with app.db() as connection:
             sync.initialize_sync(connection, "hardening-device-a")
+            app.sync_service._status_schema(connection)
         app.sync_service.status()
         with app.db() as connection:
             connection.execute(

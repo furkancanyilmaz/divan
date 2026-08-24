@@ -4,15 +4,36 @@ from unittest import mock
 from support import HTTPTestCase, app
 
 
+# Young'ın mod haritasının tamamı. Anahtarlar kalıcıdır: eşitleme ve
+# kullanıcı kayıtları bunlara dayanır, yeniden adlandırılmaz.
 REQUIRED_STRATEGY_IDS = {
+    # Çocuk modları
     "vulnerable_child",
+    "abandoned_child",
+    "lonely_child",
+    "humiliated_child",
+    "dependent_child",
     "angry_child",
+    "enraged_child",
     "impulsive_child",
+    # İşlevsiz ebeveyn modları
     "punitive_parent",
     "demanding_parent",
+    "guilt_inducing_parent",
+    # Teslimci başa çıkma
     "compliant_surrender",
+    # Kaçıngan başa çıkma
     "detached_protector",
+    "detached_self_soother",
+    "avoidant_protector",
+    # Aşırı telafi
     "overcompensator",
+    "bully_attack",
+    "counterattack",
+    "suspicious_overcontroller",
+    "perfectionistic_overcontroller",
+    "approval_seeker",
+    # Sağlıklı modlar
     "healthy_adult",
     "happy_child",
 }
@@ -30,6 +51,16 @@ class SchemaStrategyTestCase(HTTPTestCase):
 
     def propose_and_consent(self, conv_id, therapist, node_id):
         method = self.method_for_node(therapist, node_id)
+        if method["risk_level"] == "enhanced":
+            status, meta, _ = self.post(
+                "/api/session-meta",
+                conv_id=conv_id,
+                precheck_done=True,
+                safety_ok=True,
+                anxiety_start=3,
+                intensity_limit=7,
+            )
+            self.assertEqual(status, 200, meta)
         status, proposed, _ = self.post(
             "/api/technique-run",
             conv_id=conv_id,

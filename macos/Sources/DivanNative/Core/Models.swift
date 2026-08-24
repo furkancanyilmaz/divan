@@ -70,6 +70,9 @@ public struct PublicSettings: Codable, Equatable, Sendable {
     public let pinSet: Bool
     public let retentionDays: Int
     public let simpleMode: Bool
+    /// Misafir oturumu açık mı? Açıkken yalnız misafir görüşmeleri
+    /// listelenir; kapanınca misafir görüşmeleri silinir.
+    public let guestMode: Bool
     public let credentialStorage: String
     public let appVersion: String
 
@@ -82,6 +85,7 @@ public struct PublicSettings: Codable, Equatable, Sendable {
         pinSet: Bool = false,
         retentionDays: Int = 0,
         simpleMode: Bool = false,
+        guestMode: Bool = false,
         credentialStorage: String = "",
         appVersion: String = ""
     ) {
@@ -93,6 +97,7 @@ public struct PublicSettings: Codable, Equatable, Sendable {
         self.pinSet = pinSet
         self.retentionDays = retentionDays
         self.simpleMode = simpleMode
+        self.guestMode = guestMode
         self.credentialStorage = credentialStorage
         self.appVersion = appVersion
     }
@@ -205,28 +210,52 @@ public struct ConversationDetail: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+public struct MessageTechniqueMetadata: Codable, Equatable, Hashable, Sendable {
+    public let name: String
+    public let phase: String?
+    public let rationale: String?
+
+    public init(name: String, phase: String? = nil, rationale: String? = nil) {
+        self.name = name
+        self.phase = phase
+        self.rationale = rationale
+    }
+}
+
 public struct MessageRecord: Identifiable, Codable, Equatable, Sendable {
     public let id: Int
+    public let publicID: String?
     public let role: String
     public let content: String
     public let createdAt: String
     public let replyTo: Int?
     public let deliveryStatus: String?
+    public let technique: MessageTechniqueMetadata?
+    public let metaEvents: [SchemaMessageMetaEvent]
+    public let schemaBindingResult: SchemaChatBindingResult?
 
     public init(
         id: Int,
+        publicID: String? = nil,
         role: String,
         content: String,
         createdAt: String,
         replyTo: Int? = nil,
-        deliveryStatus: String? = nil
+        deliveryStatus: String? = nil,
+        technique: MessageTechniqueMetadata? = nil,
+        metaEvents: [SchemaMessageMetaEvent] = [],
+        schemaBindingResult: SchemaChatBindingResult? = nil
     ) {
         self.id = id
+        self.publicID = publicID
         self.role = role
         self.content = content
         self.createdAt = createdAt
         self.replyTo = replyTo
         self.deliveryStatus = deliveryStatus
+        self.technique = technique
+        self.metaEvents = metaEvents
+        self.schemaBindingResult = schemaBindingResult
     }
 }
 
@@ -284,12 +313,15 @@ public struct ChatRequestStatus: Codable, Equatable, Sendable {
     public let model: String
     public let content: String
     public let errorCode: String
+    public let schemaPromptProtocol: String
+    public let schemaPromptIntent: String
     public let attempt: Int
     public let maxAttempts: Int
     public let automaticRetry: Bool
     public let pending: Bool
     public let waitingForProvider: Bool
     public let nextRetryAt: String?
+    public let schemaBindingResult: SchemaChatBindingResult?
 
     public init(
         requestID: String,
@@ -303,12 +335,15 @@ public struct ChatRequestStatus: Codable, Equatable, Sendable {
         model: String,
         content: String,
         errorCode: String,
+        schemaPromptProtocol: String = "",
+        schemaPromptIntent: String = "",
         attempt: Int,
         maxAttempts: Int,
         automaticRetry: Bool,
         pending: Bool,
         waitingForProvider: Bool,
-        nextRetryAt: String?
+        nextRetryAt: String?,
+        schemaBindingResult: SchemaChatBindingResult? = nil
     ) {
         self.requestID = requestID
         self.conversationID = conversationID
@@ -321,12 +356,15 @@ public struct ChatRequestStatus: Codable, Equatable, Sendable {
         self.model = model
         self.content = content
         self.errorCode = errorCode
+        self.schemaPromptProtocol = schemaPromptProtocol
+        self.schemaPromptIntent = schemaPromptIntent
         self.attempt = attempt
         self.maxAttempts = maxAttempts
         self.automaticRetry = automaticRetry
         self.pending = pending
         self.waitingForProvider = waitingForProvider
         self.nextRetryAt = nextRetryAt
+        self.schemaBindingResult = schemaBindingResult
     }
 
     public var isTerminal: Bool {
@@ -334,7 +372,7 @@ public struct ChatRequestStatus: Codable, Equatable, Sendable {
     }
 }
 
-public struct ChatEvent: Codable, Equatable, Sendable {
+public struct ChatEvent: Decodable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case accepted
         case thinking
@@ -358,6 +396,13 @@ public struct ChatEvent: Codable, Equatable, Sendable {
     public let attempt: Int?
     public let maxAttempts: Int?
     public let request: ChatRequestStatus?
+    public let technique: MessageTechniqueMetadata?
+    public let messageMeta: [SchemaMessageMetaEvent]
+    public let nextCard: SchemaCardEnvelope?
+    public let schemaPath: SchemaPath?
+    public let interactionPolicy: SchemaPathInteractionPolicy?
+    public let resumeState: SchemaPathResumeState?
+    public let schemaBindingResult: SchemaChatBindingResult?
 
     public init(
         kind: Kind,
@@ -369,7 +414,14 @@ public struct ChatEvent: Codable, Equatable, Sendable {
         code: String? = nil,
         attempt: Int? = nil,
         maxAttempts: Int? = nil,
-        request: ChatRequestStatus? = nil
+        request: ChatRequestStatus? = nil,
+        technique: MessageTechniqueMetadata? = nil,
+        messageMeta: [SchemaMessageMetaEvent] = [],
+        nextCard: SchemaCardEnvelope? = nil,
+        schemaPath: SchemaPath? = nil,
+        interactionPolicy: SchemaPathInteractionPolicy? = nil,
+        resumeState: SchemaPathResumeState? = nil,
+        schemaBindingResult: SchemaChatBindingResult? = nil
     ) {
         self.kind = kind
         self.text = text
@@ -381,6 +433,13 @@ public struct ChatEvent: Codable, Equatable, Sendable {
         self.attempt = attempt
         self.maxAttempts = maxAttempts
         self.request = request
+        self.technique = technique
+        self.messageMeta = messageMeta
+        self.nextCard = nextCard
+        self.schemaPath = schemaPath
+        self.interactionPolicy = interactionPolicy
+        self.resumeState = resumeState
+        self.schemaBindingResult = schemaBindingResult
     }
 }
 

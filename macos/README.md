@@ -37,7 +37,7 @@ swift run Divan
 ```
 
 Kaynak geliştirme ağacında çalışırken çekirdek varsayılan olarak kardeş
-`../core` klasöründen bulunur. Açık bir test çekirdeği için
+`../freud-dev` klasöründen bulunur. Açık bir test çekirdeği için
 `RuntimeConfiguration(coreDirectory:dataDirectory:pythonExecutable:)` kullanın.
 Canlı kullanıcı DB'siyle geliştirme yapmayın.
 

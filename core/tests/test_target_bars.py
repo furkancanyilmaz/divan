@@ -62,8 +62,12 @@ class SessionChromeUISourceTests(unittest.TestCase):
         )
         icon = header[tag.end():tag.end() + 500]
         self.assertIn("sessionChromeTriangle", icon)
-        self.assertRegex(self.source,
-                         r"\.mobileHeaderMenuItem\s*\{[^}]*min-height:44px")
+        menu_rule = re.search(
+            r"\.mobileHeaderMenuItem\s*\{[^}]*min-height:(\d+)px",
+            self.source,
+        )
+        self.assertIsNotNone(menu_rule)
+        self.assertGreaterEqual(int(menu_rule.group(1)), 44)
 
     def test_collapsed_state_hides_menu_targets_and_technique_stage(self):
         self.assertRegex(

@@ -157,6 +157,8 @@ public final class ResponseKeeperJobService extends JobService {
             JobParameters params, int generation) {
         boolean reschedule = false;
         long idleFinishSignal = -1L;
+        int serverPort = -1;
+        String sessionToken = "";
         try {
             SecretStore.initialize(getApplicationContext());
             String requestedToken = randomToken();
@@ -164,8 +166,13 @@ public final class ResponseKeeperJobService extends JobService {
                     getNoBackupFilesDir(), "divan-data");
             PyObject bridge = Python.getInstance()
                     .getModule("android_entry");
-            bridge.callAttr("start_server",
-                    dataDirectory.getAbsolutePath(), requestedToken);
+            String[] launch = bridge.callAttr("start_server",
+                    dataDirectory.getAbsolutePath(), requestedToken)
+                    .toString().split("\\|", 2);
+            if (launch.length == 2) {
+                serverPort = Integer.parseInt(launch[0]);
+                sessionToken = launch[1];
+            }
             long deadline = System.currentTimeMillis() + MAX_RUN_MS;
             int failures = 0;
             int initialIdleProbes = 0;
@@ -181,6 +188,11 @@ public final class ResponseKeeperJobService extends JobService {
                     sawActive = false;
                 }
                 ProbeState state = probeJobs(bridge);
+                // Sohbet yanıtı bittiği anda bildir; seans notu, yaşayan
+                // harita veya başka bir artalan işinin de bitmesini bekleme.
+                // Outbox cursor'ı bu ucuz yoklamayı idempotent yapar.
+                CompletionNotificationController.deliverPending(
+                        getApplicationContext(), serverPort, sessionToken);
                 if (state == null) {
                     failures++;
                     if (failures >= MAX_PROBE_FAILURES) {
@@ -254,6 +266,13 @@ public final class ResponseKeeperJobService extends JobService {
                     && System.currentTimeMillis() >= deadline) {
                 reschedule = true;
             }
+            if (!reschedule && idleFinishSignal >= 0) {
+                // Yalnız terminal sohbet isteklerinden oluşan kalıcı outbox
+                // işlenir. Başka bir seans/harita işi eski bir sohbet
+                // bildirimini yanlışlıkla tetikleyemez.
+                CompletionNotificationController.deliverPending(
+                        getApplicationContext(), serverPort, sessionToken);
+            }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             reschedule = true;
@@ -271,6 +290,23 @@ public final class ResponseKeeperJobService extends JobService {
         synchronized (SCHEDULER_HANDSHAKE) {
             return pendingSignalGeneration;
         }
+    }
+
+    static String lastDelivered(Context context) {
+        return NotificationDeliveryLedger.latestDelivered(context);
+    }
+
+    /**
+     * Bir yanıtın bildirime taşındığını kalıcı olarak işaretler.
+     * {@link ChatReplyReceiver} bildirimden gelen yanıtı kendisi
+     * gösterdiğinde burayı da işaretler; böylece aynı cevap arka plan işi
+     * tarafından ikinci kez bildirime düşmez.
+     */
+    static void markDelivered(Context context, String requestId) {
+        if (requestId == null || requestId.isEmpty()) {
+            return;
+        }
+        NotificationDeliveryLedger.markRequest(context, requestId);
     }
 
     private void finishJob(

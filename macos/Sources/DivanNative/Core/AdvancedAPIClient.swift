@@ -4,6 +4,39 @@ import Foundation
 // the same authenticated, loopback-only URLSession and never expose the
 // embedded-session token or pairing secret through logs.
 public extension APIClient {
+    /// Records the user's fresh safety check immediately before consenting to
+    /// an enhanced experiential method. The adapter gathers the individual
+    /// answers; this legacy core endpoint persists only their safe aggregate.
+    func recordExperientialPrecheck(
+        conversationID: Int,
+        intensity: Int,
+        intensityLimit: Int
+    ) async throws {
+        try Self.requirePositive(conversationID, "Sohbet")
+        guard (0...7).contains(intensity) else {
+            throw Self.invalid("Başlangıç yoğunluğu 0-7 aralığında olmalı.")
+        }
+        guard (0...10).contains(intensityLimit) else {
+            throw Self.invalid("Bugünkü yoğunluk sınırı 0-10 aralığında olmalı.")
+        }
+        let response: OKResponse = try await post(
+            "/api/session-meta",
+            body: [
+                "conv_id": .number(Double(conversationID)),
+                "precheck_done": .bool(true),
+                "safety_ok": .bool(true),
+                // session_meta's older 1...10 scale cannot represent zero;
+                // zero remains a valid experiential input and is recorded as
+                // the least activated value without widening it.
+                "anxiety_start": .number(Double(max(1, intensity))),
+                "intensity_limit": .number(Double(min(7, intensityLimit))),
+            ]
+        )
+        guard response.ok != false else {
+            throw Self.invalid("Başlangıç güvenlik kontrolü kaydedilemedi.")
+        }
+    }
+
     func techniqueCatalog(
         therapistID: String,
         conversationID: Int? = nil

@@ -25,16 +25,18 @@ class ChairWorkTestCase(HTTPTestCase):
                    node_id="young:method:chair-dialogue",
                    begin=True, intensity=4, intensity_limit=None):
         conv_id = self.conversation(therapist=therapist)
-        if intensity_limit is not None:
+        method = self.method_for_node(therapist, node_id)
+        if method["risk_level"] == "enhanced" or intensity_limit is not None:
             status, body, _ = self.request(
                 "POST", "/api/session-meta", {
                     "conv_id": conv_id,
                     "precheck_done": True,
                     "safety_ok": True,
-                    "intensity_limit": intensity_limit,
+                    "anxiety_start": min(intensity, 7),
+                    "intensity_limit": (
+                        intensity_limit if intensity_limit is not None else 7),
                 })
             self.assertEqual(status, 200, body)
-        method = self.method_for_node(therapist, node_id)
         status, proposed, _ = self.request(
             "POST", "/api/technique-run", {
                 "conv_id": conv_id,
@@ -234,6 +236,14 @@ class ChairBoundaryTests(ChairWorkTestCase):
                 "action": "begin",
             })
         self.assertEqual(status, 404, body)
+
+        status, meta, _ = self.request(
+            "POST", "/api/session-meta", {
+                "conv_id": conv_id, "precheck_done": True,
+                "safety_ok": True, "anxiety_start": 4,
+                "intensity_limit": 7,
+            })
+        self.assertEqual(status, 200, meta)
 
         status, consented, _ = self.request(
             "POST", "/api/technique-run", {

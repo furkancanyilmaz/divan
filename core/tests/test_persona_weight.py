@@ -134,6 +134,17 @@ class ActiveMethodSalienceTests(HTTPTestCase):
             },
         )
         self.assertEqual(status, 200, proposed)
+        if method["risk_level"] == "enhanced":
+            status, precheck, _ = self.request(
+                "POST",
+                "/api/session-meta",
+                {
+                    "conv_id": conv_id,
+                    "precheck_done": True,
+                    "safety_ok": True,
+                },
+            )
+            self.assertEqual(status, 200, precheck)
         status, consented, _ = self.request(
             "POST",
             "/api/technique-run",
@@ -265,6 +276,17 @@ class StructuredObserverAndLessonVoiceTests(HTTPTestCase):
             },
         )
         self.assertEqual(status, 200, proposed)
+        if method["risk_level"] == "enhanced":
+            status, precheck, _ = self.request(
+                "POST",
+                "/api/session-meta",
+                {
+                    "conv_id": conv_id,
+                    "precheck_done": True,
+                    "safety_ok": True,
+                },
+            )
+            self.assertEqual(status, 200, precheck)
         status, consented, _ = self.request(
             "POST",
             "/api/technique-run",

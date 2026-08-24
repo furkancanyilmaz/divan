@@ -29,6 +29,22 @@ struct ProviderPayload: Decodable {
     let baseUrl: String?
 }
 
+struct LocalServerPayload: Decodable {
+    let label: String?
+    let baseUrl: String?
+    let models: [String]?
+    let provider: String?
+}
+
+struct LocalModelsResponse: Decodable {
+    let ok: Bool?
+    let models: [String]?
+    let baseUrl: String?
+    let servers: [LocalServerPayload]?
+    let error: String?
+    let errorCode: String?
+}
+
 struct BootstrapResponse: Decodable {
     let apiContractVersion: Int
     let appVersion: String
@@ -46,6 +62,7 @@ struct BootstrapSettingsPayload: Decodable {
     let pinSet: Bool?
     let retentionDays: Int?
     let simpleMode: Bool?
+    let guestMode: Bool?
     let credentialStorage: String?
 }
 
@@ -59,8 +76,15 @@ struct SettingsResponse: Decodable {
     let pinSet: Bool?
     let retentionDays: Int?
     let simpleMode: Bool?
+    let guestMode: Bool?
     let credentialStorage: String?
     let version: String?
+}
+
+struct GuestModeResponse: Decodable {
+    let ok: Bool?
+    let guestMode: Bool?
+    let deletedGuestConversations: Int?
 }
 
 struct ConversationPayload: Decodable {
@@ -81,11 +105,17 @@ struct ConversationPayload: Decodable {
 
 struct MessagePayload: Decodable {
     let id: Int
+    let publicId: String?
     let role: String?
     let content: String?
     let created: String?
     let replyTo: Int?
     let deliveryStatus: String?
+    let technique: String?
+    let techniquePhase: String?
+    let techniqueRationale: String?
+    let metaEvents: [SchemaMessageMetaEvent]?
+    let schemaBindingResult: SchemaChatBindingResult?
 }
 
 struct ConversationPageResponse: Decodable {
@@ -133,6 +163,9 @@ struct ChatRequestPayload: Decodable {
     let model: String?
     let content: String?
     let errorCode: String?
+    let schemaPromptProtocol: String?
+    let schemaPromptIntent: String?
+    let schemaBindingResult: SchemaChatBindingResult?
     let attempt: Int?
     let maxAttempts: Int?
     let automaticRetry: Bool?
@@ -151,6 +184,15 @@ struct ChatEventPayload: Decodable {
     let code: String?
     let attempt: Int?
     let maxAttempts: Int?
+    let technique: String?
+    let techniquePhase: String?
+    let techniqueRationale: String?
+    let messageMeta: [SchemaMessageMetaEvent]?
+    let nextCard: SchemaCardEnvelope?
+    let schemaPath: SchemaPath?
+    let interactionPolicy: SchemaPathInteractionPolicy?
+    let resumeState: SchemaPathResumeState?
+    let schemaBindingResult: SchemaChatBindingResult?
 }
 
 struct DuplicateChatResponse: Decodable {

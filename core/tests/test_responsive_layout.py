@@ -56,15 +56,20 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
         self.assertIn("border:0", bubble)
         self.assertIn("border-radius:18px", bubble)
 
-    def test_thinking_indicator_lives_inside_the_pending_assistant_bubble(self):
+    def test_thinking_indicator_is_bubble_local_but_v5_never_synthesizes_it(self):
         compact = re.sub(r"\s+", "", self.html)
         thinking = self.css_block(".bubbleThinking")
         self.assertIn("display:inline-flex", thinking)
         self.assertIn("font-style:italic", thinking)
         self.assertIn(
-            "constbubble=addBubble('assistant',"
+            "constbubble=schemaV5SilentAssistant?null:addBubble('assistant',"
             "'<pclass=\"bubbleThinking\"role=\"status\"aria-atomic=\"true\">'+"
             "'Düşünüyor<spanclass=\"dots\"aria-hidden=\"true\"></span></p>');",
+            compact,
+        )
+        self.assertIn(
+            "if(schemaV5PromptChatRequest(request)){"
+            "schemaComposerBinding=null;schemaComposerMode='disabled';",
             compact,
         )
         self.assertNotIn('id="thinking"', self.html)
@@ -421,9 +426,11 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
         self.assertLess(header.index('id="mobileHeaderMore"'),
                         header.index('id="mobileHeaderMenu"'))
         self.assertIn('role="menu"', header)
-        for control in ("mobileChatStateBtn",
-                        "mobileConversationSearchToggle",
-                        "mobileSessionChromeToggle"):
+        self.assertNotIn('id="mobileChatStateBtn"', header)
+        for control in ("mobileConversationSearchToggle",
+                        "mobileSessionChromeToggle",
+                        "mobileAdhdWorkspaceOpen",
+                        "mobileSchemaPathOpen"):
             self.assertGreater(header.index(f'id="{control}"'),
                                header.index('id="mobileHeaderMenu"'))
         self.assertIn("function setMobileHeaderMenu(open", self.html)
@@ -537,21 +544,28 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
             "width:44px;height:44px;min-width:44px;",
             compact,
         )
-        self.assertIn("#send{width:44px;height:44px;min-width:44px}", compact)
         self.assertIn(
-            "#inputBar{padding:2px8pxmax(8px,"
-            "env(safe-area-inset-bottom))}",
+            "#send{width:44px;height:44px;min-width:44px;"
+            "background:var(--divan-brand);background-image:none;",
+            compact,
+        )
+        self.assertIn(
+            "#inputBar{padding:4px8pxmax(8px,"
+            "env(safe-area-inset-bottom));background:var(--mobile-chat);"
+            "background-image:none}",
             compact,
         )
         self.assertIn(
             "#chat{padding-bottom:4px;scroll-padding-bottom:12px;"
             "overscroll-behavior-y:contain;"
-            "-webkit-overflow-scrolling:touch;touch-action:pan-y}",
+            "-webkit-overflow-scrolling:touch;touch-action:pan-y;"
+            "background:var(--mobile-chat);background-image:none}",
             compact,
         )
         self.assertIn(
             "#inputInner{max-width:none;gap:2px;padding:2px3px;"
-            "border-radius:25px}",
+            "border-radius:25px;background:var(--mobile-surface);"
+            "background-image:none;",
             compact,
         )
         self.assertIn(
@@ -560,16 +574,20 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
             compact,
         )
 
-    def test_mobile_plus_menu_collects_dream_chrome_drawer_and_settings(self):
+    def test_mobile_plus_menu_has_only_message_context_and_end_actions(self):
         compact = re.sub(r"\s+", "", self.html)
         self.assertIn('id="composerPlusBtn"', self.html)
         self.assertIn('aria-haspopup="menu"', self.html)
         self.assertIn('aria-controls="composerQuickMenu"', self.html)
         self.assertIn('id="composerQuickDream"', self.html)
-        self.assertIn('id="composerQuickChrome"', self.html)
+        self.assertIn('id="composerQuickAdhd"', self.html)
+        self.assertIn('id="composerQuickSchema"', self.html)
         self.assertIn('id="composerQuickEnd"', self.html)
-        self.assertIn('id="composerQuickDrawer"', self.html)
-        self.assertIn('id="composerQuickSettings"', self.html)
+        for removed in ("composerQuickChrome", "composerQuickHome",
+                        "composerQuickSettings"):
+            self.assertNotIn(f'id="{removed}"', self.html)
+        for label in ("Mesaj", "Bu görüşmeye özel", "Görüşme"):
+            self.assertIn(label, self.html)
         self.assertIn("#sessionChromeToggle{width:44px;height:44px;"
                       "min-width:44px;display:none!important}", compact)
         self.assertIn("#dreamBtn{display:none!important}", compact)
@@ -579,12 +597,13 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
             "reopenMobileComposer();",
             compact,
         )
-        self.assertIn("toggleSessionChrome();", compact)
         self.assertIn("awaitendSession();", compact)
-        self.assertIn("setSideOpen(true);", compact)
-        self.assertIn("try{awaitshowSettings();}", compact)
+        self.assertIn("showAdhdWorkspace('today');", compact)
+        self.assertIn("showSchemaPathWorkspace();", compact)
+        self.assertIn("if(first)setTimeout(()=>focusWithoutScrolling(first),0)",
+                      compact)
 
-    def test_mobile_drawer_opens_from_the_right_with_a_guarded_swipe(self):
+    def test_mobile_drawer_has_no_edge_swipe_and_home_owns_navigation(self):
         compact = re.sub(r"\s+", "", self.html)
         self.assertRegex(
             compact,
@@ -594,12 +613,11 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
         )
         self.assertIn("border-right:0;border-left:4pxdoublevar(--gold-dim)",
                       compact)
-        self.assertIn("constsystemEdge=24;", compact)
-        self.assertIn("Math.abs(dx)<=Math.abs(dy)*1.25", compact)
-        self.assertIn("constthreshold=Math.max(54,(state.width||280)*.32);",
-                      compact)
-        self.assertIn("velocity<-.45", compact)
-        self.assertIn("setupMobileDrawerGestures();", compact)
+        self.assertNotIn("constsystemEdge=24;", compact)
+        self.assertNotIn("sideSwipeState", self.html)
+        self.assertNotIn("setupMobileDrawerGestures", self.html)
+        self.assertIn("setupResponsiveSideDrawer();", compact)
+        self.assertIn("!mobileChatViewport();", compact)
 
     def test_mobile_header_persists_outside_collapsible_session_chrome(self):
         compact = re.sub(r"\s+", "", self.html)
@@ -615,21 +633,21 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
         self.assertNotIn(">divan<", header_markup)
         self.assertIn("#mobileHeader{display:none}", compact)
         self.assertIn(
-            "#mobileBackBtn{flex:0044px;width:44px;height:44px;"
+            "#mobileBackBtn{flex:0048px;width:48px;height:48px;"
             "display:grid;place-items:center;",
             compact,
         )
         self.assertIn(
-            "box-shadow:0002pxvar(--paper-warm),"
-            "0003pxcolor-mix(insrgb,var(--gold-dim)42%,transparent),"
-            "02px5pxcolor-mix(insrgb,var(--ink)16%,transparent)",
+            "#mobilePersonaPortrait{width:48px;height:48px;min-width:48px;",
             compact,
         )
         self.assertIn(
-            "#mobileHeader{display:flex;flex:0059px;min-width:0;"
-            "min-height:59px;",
+            "#mobileHeader{display:flex;"
+            "flex:00calc(64px+env(safe-area-inset-top));",
             compact,
         )
+        self.assertIn("background:var(--mobile-header);background-image:none;",
+                      compact)
         self.assertIn(
             "body.sessionChromeHidden#mobileHeader{display:flex}",
             compact,
@@ -647,14 +665,27 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
             compact,
         )
 
-    def test_mobile_home_groups_recent_conversations_and_opens_master_picker(self):
+    def test_mobile_home_shows_latest_master_rows_search_and_master_picker(self):
         compact = re.sub(r"\s+", "", self.html)
         self.assertIn('id="mobileHome"', self.html)
         self.assertIn('id="mobileConversationList"', self.html)
         self.assertIn('id="mobileNewConversationFab"', self.html)
-        self.assertIn('<h1 id="mobileHomeTitle" tabindex="-1">Divan</h1>',
+        self.assertIn('<h1 id="mobileHomeTitle" tabindex="-1">divan</h1>',
                       self.html)
-        self.assertIn('id="mobileConversationSelectBtn"', self.html)
+        self.assertIn('class="mobileHomeLogo"', self.html)
+        header_start = self.html.index('<header class="mobileHomeHeader">')
+        header_end = self.html.index('</header>', header_start)
+        header = self.html[header_start:header_end]
+        self.assertNotIn('id="mobileHomeMore"', header)
+        self.assertEqual(header.count("<button"), 0)
+        self.assertIn('id="mobileHomeBottomNav"', self.html)
+        self.assertIn('id="mobileHomeSearchBar" role="search"', self.html)
+        self.assertIn('id="mobileHomeSearchInput"', self.html)
+        self.assertIn('id="mobileHomeSearchResults"', self.html)
+        self.assertIn('id="mobileHomeMore"', self.html)
+        self.assertIn('id="mobileHomeMenu" role="menu"', self.html)
+        self.assertNotIn('id="mobileConversationSelectBtn"', self.html)
+        self.assertIn("functionbindMobileConversationLongPress", compact)
         self.assertIn("#mobileHome{display:none}", compact)
         self.assertIn(
             "#mobileHome[hidden],#conversationScreen[hidden]"
@@ -667,9 +698,15 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
             "()=>openMasterPicker('new');",
             compact,
         )
-        self.assertIn("constrows=awaitapi('/api/conversations');", compact)
+        self.assertIn("constrows=awaitapi('/api/conversations'+", compact)
         self.assertIn("functiongroupMobileConversations(rows)", compact)
-        self.assertIn("group.rows.slice(1).forEach", compact)
+        self.assertIn("functionlatestMobileConversationRows(rows)", compact)
+        self.assertIn(
+            "constlatestRows=latestMobileConversationRows(orderedRows);",
+            compact,
+        )
+        self.assertIn("latestRows.forEach(latest=>", compact)
+        self.assertNotIn("group.rows.slice(1).forEach", compact)
         self.assertIn("openConv(row.id);", compact)
         self.assertIn("showMobileConversation();", compact)
         self.assertIn("focusComposerForViewport();", compact)
@@ -729,7 +766,7 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
         entry_start = self.html.index(
             "function createMobileConversationEntry(")
         entry_end = self.html.index(
-            "function toggleMobileConversationGroup(", entry_start)
+            "async function archiveSelectedMobileConversations", entry_start)
         entry = re.sub(r"\s+", "", self.html[entry_start:entry_end])
         self.assertRegex(
             entry,
@@ -754,11 +791,30 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
             "overflow:hidden;overscroll-behavior:none}",
             compact,
         )
-        self.assertIn("body{position:fixed;inset:0}", compact)
+        self.assertIn(
+            "body{position:fixed;inset:0;background:var(--mobile-chat)}",
+            compact,
+        )
         self.assertIn("functionpinMobileRootScroll(){", compact)
         self.assertIn("functionsyncMobileViewportHeight(){", compact)
         self.assertIn(
             "root.style.setProperty('--mobile-vvh',height+'px');",
+            compact,
+        )
+        self.assertIn(
+            "if(height>0)root.style.setProperty('--mobile-vvh',height+'px');",
+            compact,
+        )
+        self.assertIn(
+            "if(resetAndroidMobileViewportHeight())return;",
+            compact,
+        )
+        self.assertIn(
+            "html.androidViewportFillFallback{height:100%;max-height:100%}",
+            compact,
+        )
+        self.assertIn(
+            "html.androidViewportFillFallbackbody{height:auto;max-height:none}",
             compact,
         )
         self.assertIn(

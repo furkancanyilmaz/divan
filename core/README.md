@@ -3,12 +3,12 @@
 Yerel, sıfır bağımlılık (yalnızca Python stdlib) terapi, ders ve felsefi
 diyalog uygulaması.
 Varsayılan olarak DeepSeek (deepseek-v4-pro) ile çalışır; **⚙ Ayarlar**
-içinden OpenAI, Claude (Anthropic) veya LM Studio/OpenAI uyumlu yerel model
-seçilebilir. Anahtarlar kaynak kodda tutulmaz. Görüşmeler yerel SQLite
-veritabanında saklanır; bulut sağlayıcısı seçilirse yanıt üretmek için mesaj
-içeriği o sağlayıcıya gönderilir. Yerel sağlayıcı seçildiğinde model trafiği
-yalnız bilgisayarın loopback adresinde kalır ve uygulama sessizce buluta
-geçmez.
+içinden OpenAI, Claude (Anthropic), Google Gemini veya LM Studio/OpenAI
+uyumlu yerel model seçilebilir. Anahtarlar kaynak kodda tutulmaz. Görüşmeler
+yerel SQLite veritabanında saklanır; bulut sağlayıcısı seçilirse yanıt
+üretmek için mesaj içeriği o sağlayıcıya gönderilir. Yerel sağlayıcı
+seçildiğinde model trafiği yalnız bilgisayarın loopback adresinde kalır ve
+uygulama sessizce buluta geçmez.
 
 ## Çalıştırma
 
@@ -57,14 +57,15 @@ AYRIDIR.
 
 ## Modlar ve özellikler
 
-- **Dört model seçeneği:** DeepSeek, OpenAI, Claude ve LM Studio/yerel
-  OpenAI-uyumlu sunucu. Her sağlayıcının modeli ve anahtarı ayrı saklanır.
+- **Beş model seçeneği:** DeepSeek, OpenAI, Claude, Google Gemini ve
+  LM Studio/yerel OpenAI-uyumlu sunucu. Her sağlayıcının modeli ve anahtarı
+  ayrı saklanır.
   Yerel model ekranı LM Studio (`1234`), Ollama (`11434`) ve llama.cpp
   (`8080`) için bilinen loopback adreslerini otomatik tarayabilir. Farklı
   loopback portu elle girilebilir; LAN veya internet adresi kabul edilmez.
   Ortam değişkenleri de desteklenir: `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
-  `ANTHROPIC_API_KEY`, `LMSTUDIO_API_KEY`, `LMSTUDIO_BASE_URL`,
-  `LMSTUDIO_MODEL` ve `DIVAN_LLM_PROVIDER`.
+  `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `LMSTUDIO_API_KEY`,
+  `LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL` ve `DIVAN_LLM_PROVIDER`.
 
 - **🛋️ Terapi:** kısa yanıt ve en fazla tek soru/yönerge; ekolün tekniği
   içeriden uygulanır. Her ustanın ilk dikkat alanı, klinik hamlesi, ritmi,

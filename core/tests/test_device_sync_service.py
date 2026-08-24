@@ -14,6 +14,208 @@ REMOTE_DEVICE = "b" * 32
 
 class DeviceSyncServiceTests(DatabaseTestCase):
 
+    def test_packaged_engine_transport_version_drift_fails_closed(self):
+        with mock.patch.object(
+                sync_service.transport, "SYNC_PROTOCOL_VERSION", 7), \
+                mock.patch.object(
+                    sync_service, "_snapshot_callback") as snapshot, \
+                mock.patch.object(
+                    sync_service, "_prepare_database") as prepare:
+            with self.assertRaises(sync_service.SyncServiceError) as raised:
+                sync_service.start_host(advertised_host="127.0.0.1")
+        self.assertEqual(
+            raised.exception.code,
+            sync_service.transport.SYNC_PROTOCOL_ERROR_CODE)
+        snapshot.assert_not_called()
+        prepare.assert_not_called()
+
+    def test_join_snapshot_precedes_refresh_and_merge_preparation(self):
+        order = []
+
+        def snapshot():
+            order.append("snapshot")
+
+        def prepare(*, refresh):
+            self.assertTrue(refresh)
+            order.append("prepare")
+            raise sync_engine.SyncError("legacy merge failed")
+
+        class PairedClient:
+            def close(self):
+                pass
+
+        with mock.patch.object(
+                sync_service, "_snapshot_callback", snapshot), \
+                mock.patch.object(
+                    sync_service, "_prepare_database", side_effect=prepare), \
+                mock.patch.object(
+                    sync_service.transport, "parse_invitation",
+                    return_value={"desktop_device_id": REMOTE_DEVICE}), \
+                mock.patch.object(
+                    sync_service.transport, "pair_with_invitation",
+                    return_value=(PairedClient(), {"ok": True})):
+            with self.assertRaises(sync_service.SyncServiceError):
+                sync_service.join("compatible-code")
+
+        self.assertEqual(order, ["snapshot", "prepare"])
+        self.assertFalse(sync_service.is_busy())
+
+    def test_host_snapshot_precedes_refresh_and_merge_preparation(self):
+        order = []
+
+        def snapshot():
+            order.append("snapshot")
+
+        def prepare(*, refresh):
+            self.assertTrue(refresh)
+            order.append("prepare")
+            raise sync_engine.SyncError("legacy merge failed")
+
+        peer = sync_service.transport.PeerIdentity(
+            device_id=REMOTE_DEVICE, fingerprint="c" * 64,
+            name="Telefon", platform="android", address="127.0.0.1")
+        with mock.patch.object(
+                sync_service, "_snapshot_callback", snapshot), \
+                mock.patch.object(
+                    sync_service, "_prepare_database", side_effect=prepare):
+            sync_service.start_host(advertised_host="127.0.0.1")
+            try:
+                self.assertEqual(order, [])
+                with self.assertRaises(sync_service.SyncServiceError):
+                    sync_service._host_on_batch([], peer)
+            finally:
+                sync_service.stop_host()
+
+        self.assertEqual(order, ["snapshot", "prepare"])
+        self.assertFalse(sync_service.is_busy())
+
+    def test_host_rejects_mismatched_peer_before_snapshot_or_database(self):
+        peer = sync_service.transport.PeerIdentity(
+            device_id=REMOTE_DEVICE, fingerprint="c" * 64,
+            name="Eski telefon", platform="android", address="127.0.0.1",
+            protocol_version=6, capabilities=())
+        with mock.patch.object(
+                sync_service, "_snapshot_callback") as snapshot, \
+                mock.patch.object(
+                    sync_service, "_prepare_database") as prepare:
+            with self.assertRaises(sync_service.SyncServiceError) as raised:
+                sync_service._host_on_batch([], peer)
+        self.assertEqual(
+            raised.exception.code,
+            sync_service.transport.SYNC_PROTOCOL_ERROR_CODE)
+        snapshot.assert_not_called()
+        prepare.assert_not_called()
+
+    def test_host_rejects_v6_batch_before_snapshot_or_database(self):
+        peer = sync_service.transport.PeerIdentity(
+            device_id=REMOTE_DEVICE, fingerprint="c" * 64,
+            name="Telefon", platform="android", address="127.0.0.1")
+        old_batch = {
+            "kind": sync_engine.BATCH_KIND,
+            "version": 6,
+            "sender_device_id": REMOTE_DEVICE,
+            "after_cursor": 0,
+            "cursor": 0,
+            "ack_cursor": 0,
+            "has_more": False,
+            "records": [],
+        }
+        with mock.patch.object(
+                sync_service, "_snapshot_callback") as snapshot, \
+                mock.patch.object(
+                    sync_service, "_prepare_database") as prepare:
+            with self.assertRaisesRegex(
+                    sync_engine.SyncError, "protocol v8 required"):
+                sync_service._host_on_batch([old_batch], peer)
+        snapshot.assert_not_called()
+        prepare.assert_not_called()
+
+    def test_host_rejects_v7_batch_before_snapshot_or_database(self):
+        peer = sync_service.transport.PeerIdentity(
+            device_id=REMOTE_DEVICE, fingerprint="c" * 64,
+            name="Telefon", platform="android", address="127.0.0.1")
+        legacy_batch = {
+            "kind": sync_engine.BATCH_KIND,
+            "version": 7,
+            "sender_device_id": REMOTE_DEVICE,
+            "after_cursor": 0,
+            "cursor": 0,
+            "ack_cursor": 0,
+            "has_more": False,
+            "records": [],
+        }
+        with mock.patch.object(
+                sync_service, "_snapshot_callback") as snapshot, \
+                mock.patch.object(
+                    sync_service, "_prepare_database") as prepare:
+            with self.assertRaisesRegex(
+                    sync_engine.SyncError, "protocol v8 required"):
+                sync_service._host_on_batch([legacy_batch], peer)
+        snapshot.assert_not_called()
+        prepare.assert_not_called()
+
+    def test_snapshot_failure_aborts_before_any_local_refresh(self):
+        class PairedClient:
+            def close(self):
+                pass
+
+        with mock.patch.object(
+                sync_service, "_snapshot_callback",
+                side_effect=OSError("private path detail")), \
+                mock.patch.object(
+                    sync_service, "_prepare_database") as prepare, \
+                mock.patch.object(
+                    sync_service.transport, "parse_invitation",
+                    return_value={"desktop_device_id": REMOTE_DEVICE}), \
+                mock.patch.object(
+                    sync_service.transport, "pair_with_invitation",
+                    return_value=(PairedClient(), {"ok": True})):
+            with self.assertRaisesRegex(
+                    sync_service.SyncServiceError,
+                    "güvenli geri dönüş noktası"):
+                sync_service.join("unused-code")
+        prepare.assert_not_called()
+        self.assertFalse(sync_service.is_busy())
+
+    def test_protocol_mismatch_aborts_before_snapshot_refresh_or_pairing(self):
+        with mock.patch.object(
+                sync_service, "_snapshot_callback") as snapshot, \
+                mock.patch.object(
+                    sync_service, "_prepare_database") as prepare, \
+                mock.patch.object(
+                    sync_service.transport, "parse_invitation",
+                    side_effect=sync_service.transport.
+                    SyncProtocolMismatchError(
+                        sync_service.transport.SYNC_PROTOCOL_ERROR_COPY)), \
+                mock.patch.object(
+                    sync_service.transport, "pair_with_invitation") as pair:
+            with self.assertRaises(sync_service.SyncServiceError) as raised:
+                sync_service.join("v6-code")
+        self.assertEqual(
+            raised.exception.code,
+            sync_service.transport.SYNC_PROTOCOL_ERROR_CODE)
+        self.assertEqual(
+            str(raised.exception),
+            sync_service.transport.SYNC_PROTOCOL_ERROR_COPY)
+        snapshot.assert_not_called()
+        prepare.assert_not_called()
+        pair.assert_not_called()
+        self.assertFalse(sync_service.is_busy())
+
+    def test_invalid_invitation_does_not_create_snapshot_or_refresh(self):
+        with mock.patch.object(
+                sync_service, "_snapshot_callback") as snapshot, \
+                mock.patch.object(
+                    sync_service, "_prepare_database") as prepare, \
+                mock.patch.object(
+                    sync_service.transport, "parse_invitation",
+                    side_effect=ValueError("expired")):
+            with self.assertRaises(sync_service.SyncServiceError):
+                sync_service.join("expired-code")
+        snapshot.assert_not_called()
+        prepare.assert_not_called()
+        self.assertFalse(sync_service.is_busy())
+
     def test_external_identity_store_is_device_bound_and_avoids_sidecar(self):
         values = {}
         sync_service.configure_identity_store(
@@ -133,6 +335,71 @@ class DeviceSyncServiceTests(DatabaseTestCase):
         self.assertNotIn("api_key", wire)
         self.assertNotIn("pin_hash", wire)
 
+    def test_join_wraps_local_projection_error_without_exposing_detail(self):
+        class PairedClient:
+            def close(self):
+                pass
+
+        with mock.patch.object(
+                sync_service, "_prepare_database",
+                side_effect=sync_engine.SyncError(
+                    "referenced conversation row has no sync identity")), \
+                mock.patch.object(
+                    sync_service.transport, "parse_invitation",
+                    return_value={"desktop_device_id": REMOTE_DEVICE}), \
+                mock.patch.object(
+                    sync_service.transport, "pair_with_invitation",
+                    return_value=(PairedClient(), {"ok": True})):
+            with self.assertRaises(sync_service.SyncServiceError) as raised:
+                sync_service.join("scanned-code")
+
+        message = str(raised.exception)
+        self.assertIn("Yerel eşitleme kayıtlarından biri", message)
+        self.assertNotIn("conversation", message)
+        self.assertFalse(sync_service.is_busy())
+
+    def test_host_wraps_local_projection_error_after_compatible_pair(self):
+        peer = sync_service.transport.PeerIdentity(
+            device_id=REMOTE_DEVICE, fingerprint="c" * 64,
+            name="Telefon", platform="android", address="127.0.0.1")
+        with mock.patch.object(
+                sync_service, "_prepare_database",
+                side_effect=sync_engine.SyncError(
+                    "referenced message row has no sync identity")):
+            sync_service.start_host(advertised_host="127.0.0.1")
+            try:
+                with self.assertRaises(
+                        sync_service.SyncServiceError) as raised:
+                    sync_service._host_on_batch([], peer)
+            finally:
+                sync_service.stop_host()
+
+        message = str(raised.exception)
+        self.assertIn("Yerel eşitleme kayıtlarından biri", message)
+        self.assertNotIn("message", message)
+        self.assertFalse(sync_service.is_busy())
+        state = sync_service.status()
+        self.assertFalse(state["host_running"])
+        self.assertFalse(state["busy"])
+        self.assertEqual(state["seconds_remaining"], 0)
+
+    def test_join_maps_invitation_expiry_during_pairing_to_stable_error(self):
+        invitation = {
+            "desktop_device_id": REMOTE_DEVICE,
+        }
+        with mock.patch.object(
+                sync_service.transport, "parse_invitation",
+                return_value=invitation), mock.patch.object(
+                sync_service.transport, "pair_with_invitation",
+                side_effect=ValueError("invitation has expired")):
+            with self.assertRaises(sync_service.SyncServiceError) as raised:
+                sync_service.join("almost-expired-code")
+
+        self.assertEqual(
+            str(raised.exception),
+            "Eşleme kodu geçersiz veya süresi dolmuş.")
+        self.assertFalse(sync_service.is_busy())
+
     def test_second_qr_sync_sends_zero_unchanged_records_after_ack(self):
         self.conversation(title="Yalnız bir kez gönder")
         sent_counts = []
@@ -144,7 +411,7 @@ class DeviceSyncServiceTests(DatabaseTestCase):
                 self.assert_batch(items, done)
                 local_batch = items[0]
                 sent_counts.append(len(local_batch["records"]))
-                apply_result({
+                first_result = {
                     "batch": {
                         "kind": sync_engine.BATCH_KIND,
                         "version": sync_engine.BATCH_VERSION,
@@ -155,11 +422,42 @@ class DeviceSyncServiceTests(DatabaseTestCase):
                         "has_more": False,
                         "records": [],
                     },
-                    "more": False,
+                    "more": True,
                     "apply": {
                         "records": len(local_batch["records"]),
                         "conflicts": 0,
                     },
+                    "confirmation_required": True,
+                    "exact_equal": False,
+                    "projection": None,
+                    "live_count": None,
+                }
+                apply_result(first_result)
+                final_items, final_done = next_batch(first_result)
+                assert final_done is True
+                assert len(final_items) == 2
+                confirmation = final_items[1]
+                apply_result({
+                    "batch": {
+                        "kind": sync_engine.BATCH_KIND,
+                        "version": sync_engine.BATCH_VERSION,
+                        "sender_device_id": REMOTE_DEVICE,
+                        "after_cursor": 0,
+                        "cursor": 0,
+                        "ack_cursor": final_items[0]["cursor"],
+                        "has_more": False,
+                        "records": [],
+                    },
+                    "more": False,
+                    "apply": {
+                        "records": 0,
+                        "conflicts": 0,
+                        "auto_merged": 0,
+                    },
+                    "confirmation_required": False,
+                    "exact_equal": True,
+                    "projection": confirmation["projection"],
+                    "live_count": confirmation["projection"]["live_count"],
                 })
 
             @staticmethod
@@ -225,12 +523,155 @@ class DeviceSyncServiceTests(DatabaseTestCase):
         first_cursor = first["batch"]["cursor"]
         self.assertGreater(len(first["batch"]["records"]), 0)
 
+        # A cursor becomes durable only after the peer proves the complete
+        # live projection, not merely by echoing a high-water number.
+        with app.db() as connection:
+            proof = sync_engine.projection_summary(connection)
+        confirmed = sync_service._host_on_batch([
+            peer_batch(first_cursor),
+            {
+                "kind": sync_service.PROJECTION_CONFIRM_KIND,
+                "sender_device_id": REMOTE_DEVICE,
+                "projection": proof,
+            },
+        ], peer)
+        self.assertTrue(confirmed["exact_equal"])
+
         sync_service.reset_runtime_state()
         second = sync_service._host_on_batch(
             [peer_batch(first_cursor)], peer)
 
         self.assertEqual(second["batch"]["records"], [])
         self.assertEqual(second["batch"]["cursor"], first_cursor)
+
+    def test_host_accepts_previously_offered_cursor_after_lost_response(self):
+        self.addCleanup(sync_service.reset_runtime_state)
+        self.conversation(title="Yarım kalan aktarım")
+        local_device = sync_service._device_id()
+        with app.db() as connection:
+            sync_engine.refresh_local_changes(connection, local_device)
+        peer = sync_service.transport.PeerIdentity(
+            device_id=REMOTE_DEVICE,
+            fingerprint="f" * 64,
+            name="Telefon",
+            platform="android",
+            address="192.168.1.20",
+        )
+
+        def peer_batch(ack_cursor):
+            return {
+                "kind": sync_engine.BATCH_KIND,
+                "version": sync_engine.BATCH_VERSION,
+                "sender_device_id": REMOTE_DEVICE,
+                "after_cursor": 0,
+                "cursor": 0,
+                "ack_cursor": ack_cursor,
+                "has_more": False,
+                "records": [],
+            }
+
+        offered = sync_service._host_on_batch([peer_batch(0)], peer)
+        offered_cursor = offered["batch"]["cursor"]
+        self.assertGreater(offered_cursor, 0)
+        sync_service.reset_runtime_state()
+
+        resumed = sync_service._host_on_batch(
+            [peer_batch(offered_cursor)], peer)
+        self.assertEqual(resumed["batch"]["records"], [])
+        self.assertEqual(resumed["batch"]["cursor"], offered_cursor)
+        # The acknowledgement remains provisional until projection proof.
+        with app.db() as connection:
+            self.assertEqual(
+                sync_engine.peer_ack_cursor(connection, REMOTE_DEVICE), 0)
+            self.assertEqual(
+                sync_engine.peer_offered_cursor(connection, REMOTE_DEVICE),
+                offered_cursor)
+
+    def test_host_requires_and_verifies_final_projection_confirmation(self):
+        self.addCleanup(sync_service.reset_runtime_state)
+        sync_service.reset_runtime_state()
+        self.conversation(title="Eşitlik kanıtı")
+        local_device = sync_service._device_id()
+        sync_service._prepare_database(refresh=True)
+        peer = sync_service.transport.PeerIdentity(
+            device_id=REMOTE_DEVICE,
+            fingerprint="f" * 64,
+            name="Telefon",
+            platform="android",
+            address="192.168.1.20",
+        )
+
+        def peer_batch(ack_cursor):
+            return {
+                "kind": sync_engine.BATCH_KIND,
+                "version": sync_engine.BATCH_VERSION,
+                "sender_device_id": REMOTE_DEVICE,
+                "after_cursor": 0,
+                "cursor": 0,
+                "ack_cursor": ack_cursor,
+                "has_more": False,
+                "records": [],
+            }
+
+        first = sync_service._host_on_batch([peer_batch(0)], peer)
+        self.assertTrue(first["confirmation_required"])
+        self.assertTrue(first["more"])
+        self.assertFalse(first["exact_equal"])
+        with app.db() as connection:
+            proof = sync_engine.projection_summary(connection)
+        confirmation = {
+            "kind": sync_service.PROJECTION_CONFIRM_KIND,
+            "sender_device_id": REMOTE_DEVICE,
+            "projection": proof,
+        }
+        final = sync_service._host_on_batch(
+            [peer_batch(first["batch"]["cursor"]), confirmation], peer)
+
+        self.assertEqual(final["batch"]["records"], [])
+        self.assertFalse(final["more"])
+        self.assertTrue(final["exact_equal"])
+        self.assertEqual(final["live_count"], proof["live_count"])
+        status = sync_service.status()
+        self.assertTrue(status["last_summary"]["exact_equal"])
+        self.assertEqual(
+            status["last_summary"]["live_count"], proof["live_count"])
+
+    def test_projection_mismatch_completes_without_false_equal_label(self):
+        self.addCleanup(sync_service.reset_runtime_state)
+        sync_service.reset_runtime_state()
+        self.conversation(title="Farklı eşitlik özeti")
+        sync_service._prepare_database(refresh=True)
+        peer = sync_service.transport.PeerIdentity(
+            device_id=REMOTE_DEVICE,
+            fingerprint="f" * 64,
+            name="Telefon",
+            platform="android",
+            address="192.168.1.20",
+        )
+        empty = {
+            "kind": sync_engine.BATCH_KIND,
+            "version": sync_engine.BATCH_VERSION,
+            "sender_device_id": REMOTE_DEVICE,
+            "after_cursor": 0,
+            "cursor": 0,
+            "ack_cursor": 0,
+            "has_more": False,
+            "records": [],
+        }
+        first = sync_service._host_on_batch([empty], peer)
+        with app.db() as connection:
+            proof = sync_engine.projection_summary(connection)
+        proof["digest"] = "0" * 64
+        mismatch = sync_service._host_on_batch([
+            {**empty, "ack_cursor": first["batch"]["cursor"]},
+            {
+                "kind": sync_service.PROJECTION_CONFIRM_KIND,
+                "sender_device_id": REMOTE_DEVICE,
+                "projection": proof,
+            },
+        ], peer)
+        self.assertFalse(mismatch["more"])
+        self.assertFalse(mismatch["exact_equal"])
 
     def test_clear_sync_state_resets_runtime_and_persistent_metadata(self):
         self.conversation(title="Eşitleme durumu silinecek")
@@ -284,9 +725,17 @@ class DeviceSyncServiceTests(DatabaseTestCase):
         self.assertTrue(status["secrets_excluded"])
         self.assertNotIn("sk-must-stay-local", encoded)
         self.assertNotIn("pairing_secret", encoded)
-        self.assertTrue(Path(app.DB_PATH + ".device-id").is_file())
+        self.assertFalse(Path(app.DB_PATH + ".device-id").exists())
 
-    def test_remote_conflict_choice_applies_that_version_and_closes_queue(
+    def test_status_is_read_only_before_protocol_preflight(self):
+        with mock.patch.object(
+                sync_service, "_prepare_database") as prepare:
+            state = sync_service.status()
+        prepare.assert_not_called()
+        self.assertFalse(state["host_running"])
+        self.assertFalse(Path(app.DB_PATH + ".device-id").exists())
+
+    def test_latest_remote_version_applies_without_manual_conflict_queue(
             self):
         conv_id = self.conversation(title="Ortak seans", ended=1)
         with app.db() as connection:
@@ -311,7 +760,7 @@ class DeviceSyncServiceTests(DatabaseTestCase):
                 "revision": 1,
                 "parent_origin_device_id": None,
                 "parent_revision": None,
-                "updated_at": "2026-07-30T11:00:00+00:00",
+                "updated_at": "2099-07-30T11:00:00+00:00",
             })
             incoming["payload"]["content"] = "Diğer cihazdaki not"
             batch = {
@@ -326,21 +775,13 @@ class DeviceSyncServiceTests(DatabaseTestCase):
             }
             merged = sync_engine.apply_change_batch(
                 connection, batch, "a" * 32)
-            conflict = sync_engine.list_conflicts(connection)[0]
-        self.assertEqual(merged["conflicts"], 1)
-
-        result = sync_service.resolve_conflict(
-            int(conflict["id"]), "remote")
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["conflicts"], [])
-        with app.db() as connection:
             content = connection.execute(
                 "SELECT content FROM notes WHERE id=?", (note_id,)
             ).fetchone()[0]
-            resolved = sync_engine.list_conflicts(
-                connection, status="resolved")
+            conflicts = sync_engine.list_conflicts(connection)
+        self.assertEqual(merged["conflicts"], 0)
         self.assertEqual(content, "Diğer cihazdaki not")
-        self.assertEqual(resolved[0]["resolution"], "keep_remote")
+        self.assertEqual(conflicts, [])
 
 
 class DeviceSyncAPITests(HTTPTestCase):
@@ -350,6 +791,20 @@ class DeviceSyncAPITests(HTTPTestCase):
         self.assertEqual(status, 200)
         self.assertTrue(body["secrets_excluded"])
         self.assertIn("messages", body["scope"])
+        self.assertIn("adhd_habits", body["scope"])
+        self.assertIn(
+            "shared_non_sensitive_adhd_journal_entries", body["scope"])
+        self.assertIn(
+            "explicitly_consented_schema_path_v4_v5_projection",
+            body["scope"])
+        self.assertIn(
+            "schema_prompt_plans_and_results", body["device_local"])
+        self.assertIn("reminders", body["device_local"])
+        self.assertIn(
+            "schema_raw_observations_and_claims", body["device_local"])
+        self.assertIn("schema_provider_consent", body["device_local"])
+        self.assertIn(
+            "schema_technique_transcripts", body["device_local"])
 
     def test_join_route_passes_explicit_device_identity(self):
         expected = {
@@ -371,6 +826,26 @@ class DeviceSyncAPITests(HTTPTestCase):
         join.assert_called_once_with(
             "DV1-safe", device_name="Android telefon",
             platform_name="android")
+
+    def test_protocol_update_error_code_and_copy_reach_the_local_ui(self):
+        error = sync_service.SyncServiceError(
+            sync_service.transport.SYNC_PROTOCOL_ERROR_COPY,
+            sync_service.transport.SYNC_PROTOCOL_ERROR_CODE,
+        )
+        with mock.patch.object(
+                app.sync_service, "join", side_effect=error):
+            status, body, _ = self.request(
+                "POST", "/api/sync/join", {
+                    "code": "DV1-old-peer",
+                    "device_name": "Android telefon",
+                    "platform": "android",
+                })
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            body["error_code"],
+            sync_service.transport.SYNC_PROTOCOL_ERROR_CODE)
+        self.assertEqual(
+            body["error"], sync_service.transport.SYNC_PROTOCOL_ERROR_COPY)
 
     def test_unknown_sync_fields_are_rejected(self):
         status, body, _ = self.request(
@@ -414,10 +889,79 @@ class DeviceSyncInterfaceTests(DatabaseTestCase):
             self.html,
         )
 
-    def test_conflicts_require_an_explicit_local_or_remote_choice(self):
-        start = self.html.index("function renderDeviceSyncConflicts")
+    def test_latest_merge_is_automatic_and_exactness_is_proven(self):
+        start = self.html.index("function deviceSyncMergeResult")
         end = self.html.index("function applyDeviceSyncStatus", start)
         source = self.html[start:end]
-        self.assertIn("['Bu cihazdaki','local']", source)
-        self.assertIn("['Diğer cihazdaki','remote']", source)
-        self.assertNotIn("'both'", source)
+        self.assertIn("source.auto_merged", source)
+        self.assertIn("source.exact_equal===true", source)
+        self.assertIn("Eşitlik kanıtlanamadı", source)
+        self.assertIn("'/api/sync/conflict'", self.html)
+        self.assertIn(
+            "normal kayıtların en güncel güvenli sürümünün otomatik",
+            self.html)
+        self.assertIn("Normal kayıtlar otomatik birleşir", self.html)
+        self.assertIn("Bu cihazdaki", self.html)
+        self.assertIn("Diğer cihazdaki", self.html)
+        self.assertIn(
+            "Silme ve gizlilik kararı her zaman", self.html)
+
+    def test_clinical_pause_and_conflict_ui_are_content_free(self):
+        for marker in (
+                "clinical_confirmation_required",
+                "clinical_confirmation_device",
+                "pending_clinical_confirmation_conv_ids",
+                "clinical_safety_pause", "clinical_safety_device",
+                "Güvenlik beklemesi kapandıktan sonra yeni bir QR",
+                "syncClinicalApprove", "syncClinicalDecline",
+                "normalizeDeviceSyncConflicts",
+                "deviceSyncState.conflictBusy.has"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.html)
+        conflict = self.html[
+            self.html.index("function normalizeDeviceSyncConflicts"):
+            self.html.index("function renderDeviceSyncConflicts")]
+        for safe_key in ("title", "summary", "reason"):
+            self.assertIn(safe_key, conflict)
+        for sensitive_key in ("incoming_json", "local_json", "payload_json"):
+            self.assertNotIn(sensitive_key, conflict)
+
+    def test_last_sync_status_uses_the_existing_timestamp_formatter(self):
+        start = self.html.index("function applyDeviceSyncStatus")
+        end = self.html.index("async function loadDeviceSyncStatus", start)
+        source = self.html[start:end]
+        self.assertIn(
+            "mobileMasterHistoryStamp(status.last_sync_at)", source)
+        self.assertNotIn("formatMessageClock", source)
+
+    def test_protocol_update_pause_clears_local_join_state_without_refresh(self):
+        start = self.html.index("async function joinDeviceSync()")
+        end = self.html.index("function closeDeviceSync()", start)
+        source = self.html[start:end]
+        branch_start = source.index("const updateRequired=")
+        branch_end = source.index(
+            "$('syncJoinResult').textContent=\n"
+            "      'Eşitleme tamamlanamadı", branch_start)
+        branch = source[branch_start:branch_end]
+        self.assertIn("sync_protocol_update_required", branch)
+        self.assertIn(
+            "Her iki cihazdaki Divan’ı güncelleyin; sonra yeni QR oluşturun.",
+            branch,
+        )
+        self.assertIn("resetDeviceSyncInvitation()", branch)
+        self.assertIn("deviceSyncState.pollTimer=null", branch)
+        self.assertIn("$('syncJoinCode').value=''", branch)
+        self.assertIn("$('syncConsent').checked=false", branch)
+        self.assertIn("hiçbir veri aktarılmadı", branch)
+        self.assertIn("return;", branch)
+        self.assertNotIn("refreshConversationLists", branch)
+        self.assertNotIn("openConv", branch)
+        self.assertNotIn("loadDeviceSyncStatus", branch)
+
+        api_start = self.html.index(
+            "async function api(path, body, {quiet=false}={})")
+        api_end = self.html.index("const API_GET_RETRY_DELAYS", api_start)
+        self.assertIn(
+            "err.code=String(data&&data.error_code||'')",
+            self.html[api_start:api_end],
+        )

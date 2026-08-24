@@ -5,9 +5,14 @@ Divan'ın bağımsız iPhone/iPad kabuğudur. SwiftUI uygulaması gömülü CPyt
 `127.0.0.1` üzerinde rastgele bir portta açar ve arayüzü `WKWebView` içinde
 gösterir.
 
-Bu kaynak ağacı ortak Divan **2026.08.10.2** sürümüne karşılık gelir. iOS
-paketinde Apple sürüm biçimiyle `2026.8.10` pazarlama sürümü ve önceki paketten
-yüksek `5` derleme numarası kullanılır.
+Bu kaynak ağacı ortak Divan **2026.08.17.5** sürümüne karşılık gelir. iOS
+paketinde Apple sürüm biçimiyle `2026.8.17` pazarlama sürümü ve önceki paketten
+yüksek `7` derleme numarası kullanılır.
+
+Ortak terapi motoru ve arayüzü; ADHD ritimleri/defteri, kullanıcı onaylı
+Şema Terapi çalışma yolu ve bunların güvenlik durdurmalarıyla birlikte her
+derlemede `../freud-dev` kaynağından alınır. iOS kabuğu ayrıca izin verilmiş
+ADHD hatırlatıcılarını uygulama kapalıyken de sistem bildirimi olarak kurar.
 
 Arayüz, veritabanı, hafıza, eşitleme motoru ve HTTP sunucusu cihazın içindedir;
 masaüstü Divan'ın açık kalmasına ihtiyaç duymaz. Model yanıtı için kullanıcı
@@ -25,7 +30,7 @@ iPhone'un kendisini ifade ettiği için, telefonda ayrıca bir model sunucusu
 - `DivanPython/ios_entry.py`: ortak `server.py` uygulamasını iOS içinde başlatır.
 - `Scripts/prepare_python_bundle.sh`: her derlemede ortak Divan kaynaklarını
   kullanıcı verisi olmadan kopyalar; kaynakları ortak dosyalarla bayt bayt
-  karşılaştırır, sync v2 ile DB/API anahtarı korumalarını denetler, ardından
+  karşılaştırır, sync v3 ile DB/API anahtarı korumalarını denetler, ardından
   Python stdlib/paketlerini yerleştirir ve native uzantıları iOS frameworklerine
   dönüştürür.
 - `Vendor/Python.xcframework`: cihaz ve simülatör CPython 3.13 dilimleri.
@@ -72,10 +77,12 @@ xcodebuild -project Divan.xcodeproj -target Divan \
 ```
 
 Sonuç paketi `Scripts/verify_bundle.sh` ile denetlenebilir. Bu denetim paket
-sürümünü, ortak `server.py`/`index.html`/sync dosyalarının güncelliğini, sync v2
-işaretini ve pakette DB ya da anahtar benzeri içerik bulunmadığını da doğrular.
+sürümünü, ortak `server.py`/`index.html`/sync dosyalarının güncelliğini, sync v3
+işaretini, ADHD/Şema çalışma alanlarını ve pakette DB ya da anahtar benzeri
+içerik bulunmadığını da doğrular. Derlemeden önce aynı kaynak sözleşmesi
+`Scripts/test_source_contract.sh` ile hızlıca denetlenebilir.
 İmzasız geliştirici IPA'sı `Scripts/package_unsigned_ipa.sh` ile
-`dist/Divan-iOS-2026.08.10.2-Standalone-Unsigned.ipa` adına hazırlanır; bu IPA
+`dist/Divan-iOS-2026.08.17.5-Standalone-Unsigned.ipa` adına hazırlanır; bu IPA
 kod doğrulaması içindir ve normal iPhone'a kurulmadan önce Apple hesabıyla
 imzalanmalıdır.
 

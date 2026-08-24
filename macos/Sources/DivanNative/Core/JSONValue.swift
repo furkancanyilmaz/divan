@@ -2,7 +2,7 @@ import Foundation
 
 /// A bounded, typed representation of JSON used for forward-compatible
 /// capability documents. Clinical/user content should use explicit DTOs.
-public enum JSONValue: Codable, Equatable, Sendable {
+public enum JSONValue: Codable, Equatable, Hashable, Sendable {
     case string(String)
     case number(Double)
     case bool(Bool)
@@ -41,6 +41,31 @@ public enum JSONValue: Codable, Equatable, Sendable {
         case .object(let value): try container.encode(value)
         case .array(let value): try container.encode(value)
         case .null: try container.encodeNil()
+        }
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        switch self {
+        case .string(let value):
+            hasher.combine(0)
+            hasher.combine(value)
+        case .number(let value):
+            hasher.combine(1)
+            hasher.combine(value)
+        case .bool(let value):
+            hasher.combine(2)
+            hasher.combine(value)
+        case .object(let value):
+            hasher.combine(3)
+            for key in value.keys.sorted() {
+                hasher.combine(key)
+                hasher.combine(value[key])
+            }
+        case .array(let value):
+            hasher.combine(4)
+            hasher.combine(value)
+        case .null:
+            hasher.combine(5)
         }
     }
 }

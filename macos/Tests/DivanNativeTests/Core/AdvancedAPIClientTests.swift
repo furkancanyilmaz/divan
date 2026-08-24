@@ -167,6 +167,29 @@ final class AdvancedAPIClientTests: XCTestCase {
         XCTAssertEqual(posted.get()["confirmed"] as? Bool, true)
     }
 
+    func testEnhancedExperientialPrecheckPersistsBoundedAggregateBeforeConsent() async throws {
+        let posted = AdvancedLockedBox<[String: Any]>([:])
+        AdvancedStubURLProtocol.install { request in
+            let path = try XCTUnwrap(request.url?.path)
+            if path == "/" { return (200, Data("ok".utf8)) }
+            XCTAssertEqual(path, "/api/session-meta")
+            posted.set(try advancedBody(request))
+            return (200, Data(#"{"ok":true}"#.utf8))
+        }
+        let client = try makeAdvancedClient()
+        try await client.recordExperientialPrecheck(
+            conversationID: 12,
+            intensity: 4,
+            intensityLimit: 10
+        )
+        let body = posted.get()
+        XCTAssertEqual(body["conv_id"] as? Int, 12)
+        XCTAssertEqual(body["precheck_done"] as? Bool, true)
+        XCTAssertEqual(body["safety_ok"] as? Bool, true)
+        XCTAssertEqual(body["anxiety_start"] as? Int, 4)
+        XCTAssertEqual(body["intensity_limit"] as? Int, 7)
+    }
+
     func testChairBeginSendsExplicitFrameAndMapsDynamicParticipants() async throws {
         let posted = AdvancedLockedBox<[String: Any]>([:])
         AdvancedStubURLProtocol.install { request in
@@ -463,7 +486,7 @@ final class AdvancedAPIClientTests: XCTestCase {
             }
             XCTAssertEqual(path, "/api/sync/join")
             joinBody.set(try advancedBody(request))
-            return (200, Data(#"{"ok":true,"summary":{"sent":4,"received":7,"conflicts":1},"last_sync_at":"2026-08-11 12:00","conflict_rows":[{"id":2,"record_type":"conversation","title":"A","reason":"İki tarafta değişti"}]}"#.utf8))
+            return (200, Data(#"{"ok":true,"summary":{"sent":4,"received":7,"conflicts":1,"clinical_confirmation_required":true},"exact_equal":false,"clinical_confirmation_required":true,"clinical_confirmation_device":"this_device","clinical_confirmation_message":"Şema çalışma kayıtlarını bu cihazda onaylayın.","pending_clinical_confirmation_conv_ids":[12],"pending_clinical_confirmation_count":1,"last_sync_at":"2026-08-11 12:00","conflict_rows":[{"id":2,"record_type":"conversation","title":"A","reason":"İki tarafta değişti"}]}"#.utf8))
         }
         let client = try makeAdvancedClient()
         let invitation = try await client.startDeviceSyncHost()
@@ -475,8 +498,73 @@ final class AdvancedAPIClientTests: XCTestCase {
         )
         XCTAssertEqual(result.summary.received, 7)
         XCTAssertEqual(result.conflicts.first?.id, 2)
+        XCTAssertTrue(result.clinicalConfirmationRequired)
+        XCTAssertEqual(result.clinicalConfirmationDevice, "this_device")
+        XCTAssertEqual(
+            result.pendingClinicalConfirmationConversationIDs,
+            [12]
+        )
+        XCTAssertEqual(result.pendingClinicalConfirmationCount, 1)
         XCTAssertEqual(joinBody.get()["code"] as? String, "secret-pairing-payload")
         XCTAssertEqual(joinBody.get()["device_name"] as? String, "Furkan'ın iPhone'u")
+    }
+
+    func testSyncV6StatusDecodesLocalClinicalConfirmationWithoutGenericConflict() async throws {
+        AdvancedStubURLProtocol.install { request in
+            if request.url?.path == "/" { return (200, Data("ok".utf8)) }
+            XCTAssertEqual(request.url?.path, "/api/sync/status")
+            return (200, Data(#"{"host_running":false,"busy":false,"seconds_remaining":0,"last_sync_at":"2026-08-22 12:00:00","last_peer_name":"Android","last_summary":{"sent":3,"received":4,"conflicts":0,"clinical_confirmation_required":true},"conflicts":[],"pending_clinical_confirmation_conv_ids":[12,19],"pending_clinical_confirmation_count":2,"scope":[],"secrets_excluded":true}"#.utf8))
+        }
+        let status = try await makeAdvancedClient().deviceSyncStatus()
+        XCTAssertTrue(status.lastSummary.clinicalConfirmationRequired)
+        XCTAssertEqual(
+            status.pendingClinicalConfirmationConversationIDs,
+            [12, 19]
+        )
+        XCTAssertEqual(status.pendingClinicalConfirmationCount, 2)
+        XCTAssertTrue(status.conflicts.isEmpty)
+    }
+
+    func testSyncV6JoinDecodesClinicalSafetyPauseSeparatelyFromConsent() async throws {
+        AdvancedStubURLProtocol.install { request in
+            if request.url?.path == "/" { return (200, Data("ok".utf8)) }
+            XCTAssertEqual(request.url?.path, "/api/sync/join")
+            return (200, Data(#"{"ok":true,"summary":{"sent":2,"received":3,"conflicts":0,"clinical_confirmation_required":false,"clinical_safety_pause":true},"exact_equal":false,"clinical_confirmation_required":false,"clinical_safety_pause":true,"clinical_safety_device":"this_device","clinical_safety_message":"Bu cihazdaki güvenlik beklemesi sürerken Şema kayıtları alınmadı.","pending_clinical_confirmation_conv_ids":[],"pending_clinical_confirmation_count":0,"last_sync_at":"2026-08-22 12:10","conflict_rows":[]}"#.utf8))
+        }
+        let result = try await makeAdvancedClient().pairAndApplyDeviceSync(
+            code: "fresh-safety-pause",
+            deviceName: "Mac",
+            platform: "macos"
+        )
+        XCTAssertTrue(result.clinicalSafetyPause)
+        XCTAssertEqual(result.clinicalSafetyDevice, "this_device")
+        XCTAssertTrue(
+            result.clinicalSafetyMessage?.contains("güvenlik beklemesi")
+                == true
+        )
+        XCTAssertFalse(result.clinicalConfirmationRequired)
+        XCTAssertTrue(
+            result.pendingClinicalConfirmationConversationIDs.isEmpty
+        )
+    }
+
+    func testSyncV6StatusRecoversClinicalSafetyPauseFromSummary() async throws {
+        AdvancedStubURLProtocol.install { request in
+            if request.url?.path == "/" { return (200, Data("ok".utf8)) }
+            XCTAssertEqual(request.url?.path, "/api/sync/status")
+            return (200, Data(#"{"host_running":false,"busy":false,"seconds_remaining":0,"last_sync_at":"2026-08-22 12:10:00","last_peer_name":"Android","last_summary":{"sent":2,"received":3,"conflicts":0,"clinical_confirmation_required":false,"clinical_safety_pause":true,"clinical_safety_device":"computer","clinical_safety_message":"Bilgisayardaki güvenlik beklemesi sürüyor."},"conflicts":[],"pending_clinical_confirmation_conv_ids":[],"pending_clinical_confirmation_count":0,"scope":[],"secrets_excluded":true}"#.utf8))
+        }
+        let status = try await makeAdvancedClient().deviceSyncStatus()
+        XCTAssertTrue(status.clinicalSafetyPause)
+        XCTAssertEqual(status.clinicalSafetyDevice, "computer")
+        XCTAssertEqual(
+            status.clinicalSafetyMessage,
+            "Bilgisayardaki güvenlik beklemesi sürüyor."
+        )
+        XCTAssertFalse(status.lastSummary.clinicalConfirmationRequired)
+        XCTAssertTrue(
+            status.pendingClinicalConfirmationConversationIDs.isEmpty
+        )
     }
 
     func testSyncRejectsMalformedQRMatrix() async throws {

@@ -100,6 +100,22 @@ class SessionWorkTestCase(HTTPTestCase):
         return body["run"]
 
     def consent_technique(self, conv_id, run_id):
+        run = self.row(
+            "SELECT r.method_key,c.therapist FROM technique_runs r "
+            "JOIN conversations c ON c.id=r.conv "
+            "WHERE r.id=? AND r.conv=?",
+            (run_id, conv_id),
+        )
+        self.assertIsNotNone(run)
+        method = app.method_record(run["therapist"], run["method_key"])
+        if method and method["risk_level"] == "enhanced":
+            status, body, _ = self.post(
+                "/api/session-meta",
+                conv_id=conv_id,
+                precheck_done=True,
+                safety_ok=True,
+            )
+            self.assertEqual(status, 200, body)
         status, body, _ = self.post(
             "/api/technique-run",
             conv_id=conv_id,

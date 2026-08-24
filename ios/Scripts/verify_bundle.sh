@@ -2,10 +2,10 @@
 set -eu
 
 PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-SOURCE_ROOT="$PROJECT_DIR/../core"
-RELEASE_LABEL="2026.08.10.2"
-EXPECTED_MARKETING_VERSION="2026.8.10"
-EXPECTED_BUILD_VERSION="5"
+SOURCE_ROOT="$PROJECT_DIR/../freud-dev"
+RELEASE_LABEL="2026.08.17.5"
+EXPECTED_MARKETING_VERSION="2026.8.17"
+EXPECTED_BUILD_VERSION="8"
 APP_PATH="${1:-}"
 if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
     echo "Kullanım: $0 /tam/yol/Divan.app" >&2
@@ -25,6 +25,7 @@ for required in \
     app/ios_entry.py \
     app/assets/portraits/manifest.json \
     app/assets/portraits/freud.jpg \
+    app/assets/imagery/manifest.json \
     AppIcon60x60@2x.png \
     app_packages/certifi/cacert.pem \
     PrivacyInfo.xcprivacy \
@@ -69,9 +70,87 @@ do
     fi
 done
 
-if ! grep -E -q '^BATCH_VERSION[[:space:]]*=[[:space:]]*2[[:space:]]*$' \
+python3 - "$SOURCE_ROOT/assets/imagery" "$APP_PATH/app/assets/imagery" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+packaged = pathlib.Path(sys.argv[2])
+manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+cards = manifest.get("cards")
+if manifest.get("card_count") != 24 or not isinstance(cards, list) or len(cards) != 24:
+    raise SystemExit("Freud imgeleme manifesti geçersiz.")
+names = {"manifest.json"}
+for card in cards:
+    filename = card.get("file") if isinstance(card, dict) else None
+    if not isinstance(filename, str) or pathlib.PurePath(filename).name != filename or not filename.endswith(".webp"):
+        raise SystemExit("Freud imgeleme manifestinde geçersiz dosya adı var.")
+    names.add(filename)
+actual = {path.name for path in packaged.iterdir() if path.is_file()}
+if names != actual:
+    raise SystemExit("iOS Freud imgeleme destesi tam veya allowlist ile uyumlu değil.")
+for name in names:
+    source_data = (source / name).read_bytes()
+    packaged_data = (packaged / name).read_bytes()
+    if source_data != packaged_data:
+        raise SystemExit(f"iOS Freud imgeleme dosyası güncel değil: {name}")
+    if name != "manifest.json":
+        card = next(item for item in cards if item["file"] == name)
+        if card.get("bytes") != len(source_data) or card.get("sha256") != hashlib.sha256(source_data).hexdigest():
+            raise SystemExit(f"Freud imgeleme kartı manifestle uyuşmuyor: {name}")
+PY
+
+if ! grep -E -q '^BATCH_VERSION[[:space:]]*=[[:space:]]*3[[:space:]]*$' \
         "$APP_PATH/app/sync_engine.py"; then
-    echo "Paket cihaz eşitleme protokolü v2'yi içermiyor." >&2
+    echo "Paket cihaz eşitleme protokolü v3'ü içermiyor." >&2
+    exit 1
+fi
+for marker in \
+    '"adhd_habit": RecordSpec(' \
+    '_ADHD_EVENT_SYNC_STATUSES' \
+    '_projection_payload_allowed' \
+    'DEVICE_LOCAL_CLINICAL_TABLES'
+do
+    if ! grep -F -q "$marker" "$APP_PATH/app/sync_engine.py"; then
+        echo "Paket güvenli ADHD eşitleme projeksiyonunu içermiyor: $marker" >&2
+        exit 1
+    fi
+done
+
+# The iOS shell deliberately reuses the common therapy engine and web UI.
+# Guard the release against a successful-looking build made from a stale
+# sibling freud-dev tree: both the API and the user-facing workspaces must be
+# present in the sealed application bundle.
+for marker in \
+    'path == "/api/adhd/dashboard"' \
+    'path == "/api/adhd/habits"' \
+    'path == "/api/adhd/journal"' \
+    'path == "/api/schema-path"' \
+    'suppressed_safety'
+do
+    if ! grep -F -q "$marker" "$APP_PATH/app/server.py"; then
+        echo "Paket güncel ADHD/Şema terapi motorunu içermiyor: $marker" >&2
+        exit 1
+    fi
+done
+
+for marker in \
+    'id="adhdWorkspaceOverlay"' \
+    'id="adhdJournalForm"' \
+    'id="schemaPathOverlay"' \
+    'scheduleReminderNotificationFor'
+do
+    if ! grep -F -q "$marker" "$APP_PATH/app/index.html"; then
+        echo "Paket güncel ADHD/Şema arayüzünü içermiyor: $marker" >&2
+        exit 1
+    fi
+done
+
+if ! strings "$APP_PATH/Divan" | grep -F -q \
+        'scheduleReminderNotification'; then
+    echo "iOS paketi yerel ADHD hatırlatıcı köprüsünü içermiyor." >&2
     exit 1
 fi
 

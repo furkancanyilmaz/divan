@@ -2,7 +2,16 @@ import SwiftUI
 
 struct LivingMapView: View {
     @ObservedObject var model: AdvancedWorkspaceViewModel
+    let schemaAnalysisDataSource: (any StructuredTherapyDataSource)?
     @State private var expandedCards: Set<String> = []
+
+    init(
+        model: AdvancedWorkspaceViewModel,
+        schemaAnalysisDataSource: (any StructuredTherapyDataSource)? = nil
+    ) {
+        self.model = model
+        self.schemaAnalysisDataSource = schemaAnalysisDataSource
+    }
 
     var body: some View {
         ScrollView {
@@ -20,6 +29,14 @@ struct LivingMapView: View {
                 }
 
                 hypothesisBoundary
+                if model.context.masterID == "young",
+                   let conversationID = model.context.conversationID,
+                   let schemaAnalysisDataSource {
+                    LivingMapTurnAnalysisPanel(
+                        dataSource: schemaAnalysisDataSource,
+                        conversationID: conversationID
+                    )
+                }
                 filterBar
 
                 if model.filteredLivingMapCards.isEmpty {
@@ -41,7 +58,7 @@ struct LivingMapView: View {
     private var livingMapHeader: some View {
         AdvancedSectionHeader(
             title: "Yaşayan harita",
-            detail: "Sohbetlerde tekrar eden işaretleri, dayanaklarıyla birlikte inceleyin. Her kart değişebilir bir çalışma hipotezidir; tanı değildir.",
+            detail: "Tamamlanmış kullanıcı–usta mesaj çiftlerinde beliren işaretleri, mesaj dayanaklarıyla inceleyin. Her kart değişebilir bir çalışma hipotezidir; tanı değildir.",
             systemImage: "point.3.connected.trianglepath.dotted"
         )
     }
@@ -285,6 +302,121 @@ struct LivingMapView: View {
         case .partial: "circle.lefthalf.filled"
         case .context: "arrow.triangle.branch"
         case .rejectEvidence: "xmark.circle"
+        }
+    }
+}
+
+private struct LivingMapTurnAnalysisPanel: View {
+    @StateObject private var schemaModel: SchemaPathViewModel
+
+    init(
+        dataSource: any StructuredTherapyDataSource,
+        conversationID: Int
+    ) {
+        _schemaModel = StateObject(wrappedValue: SchemaPathViewModel(
+            dataSource: dataSource,
+            conversationID: conversationID
+        ))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Mesaj bazında harita incelemesi", systemImage: "text.bubble")
+                    .font(.headline)
+                Spacer()
+                if schemaModel.isBusy { ProgressView().controlSize(.small) }
+            }
+            Text("Kerem ile her tamamlanmış kullanıcı–Kerem mesaj çifti ayrı bir turdur. Yarım, başarısız, özel veya güvenlik kapsamındaki turlar haritaya işlenmez.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Her tamamlanmış mesaj çifti ayrı bir model çağrısıdır; bulut sağlayıcınız ücretlendirebilir.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if schemaModel.snapshot == nil {
+                ProgressView("Mesaj çifti kapsamı yükleniyor…")
+                    .controlSize(.small)
+            } else if schemaModel.schemaMode?.enabled != true {
+                Text("Gelecekteki mesaj çiftlerinin otomatik incelenmesi kapalı. Kerem Genç konuşmasındaki Şema terapisi modu ayarından açabilirsiniz; geçmiş kapsamı yine ayrıca onaylanır.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let analysis = schemaModel.turnAnalysis {
+                ProgressView(
+                    value: Double(analysis.analyzedTurns),
+                    total: Double(max(1, analysis.eligibleTurns))
+                )
+                Text("\(analysis.analyzedTurns) / \(analysis.eligibleTurns) tamamlanmış tur incelendi · \(analysis.remainingTurns) kaldı")
+                    .font(.callout.monospacedDigit())
+                if let provider = analysis.provider {
+                    Text("\(provider.label) · \(provider.model) · \(provider.local ? "yerel" : "bulut")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if analysis.processing {
+                    Label(
+                        analysis.job?.stage ?? "İnceleme kaldığı yerden sürüyor…",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else if analysis.remainingTurns > 0 {
+                    Toggle(
+                        "Bu geçmiş mesaj çifti sayısını ve sağlayıcıyı gördüm; tek tek incelemeyi onaylıyorum",
+                        isOn: $schemaModel.historicalScanConfirmed
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    ViewThatFits(in: .horizontal) {
+                        HStack { scanActions(analysis) }
+                        VStack(alignment: .leading) { scanActions(analysis) }
+                    }
+                } else {
+                    Label("Uygun tamamlanmış mesaj çiftleri güncel", systemImage: "checkmark.circle")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let failure = schemaModel.failure {
+                Text(failure.message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !schemaModel.statusMessage.isEmpty {
+                Text(schemaModel.statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DivanPalette.parchment.opacity(0.34), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(DivanPalette.gold.opacity(0.42))
+        }
+        .task { await schemaModel.loadIfNeeded() }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("livingMap.turnAnalysis")
+    }
+
+    @ViewBuilder
+    private func scanActions(_ analysis: SchemaTurnAnalysisState) -> some View {
+        Button(analysis.failedTurns > 0 ? "Kaldığı yerden sürdür" : "Geçmiş incelemeyi başlat") {
+            Task { await schemaModel.scanHistoricalTurns() }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(DivanPalette.wine)
+        .disabled(!schemaModel.historicalScanConfirmed || schemaModel.isBusy)
+        if analysis.failedTurns > 0, analysis.job?.id != nil {
+            Button("Başarısız turu yeniden dene") {
+                Task { await schemaModel.retryHistoricalScan() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(schemaModel.isBusy)
         }
     }
 }

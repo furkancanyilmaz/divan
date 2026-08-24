@@ -13,6 +13,8 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
     private var chairMethodByConversation: [Int: TechniqueMethod] = [:]
     private var imageryMethodByConversation: [Int: TechniqueMethod] = [:]
     private var activeInvitation: DeviceSyncInvitation?
+    private var activeInvitationStartedAt: Date?
+    private var clinicalSyncRequestIDs: [String: String] = [:]
 
     public init(loader: DivanRuntimeLoader) {
         self.loader = loader
@@ -29,7 +31,15 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
         }
 
         let sync = try await client.deviceSyncStatus()
-        let syncStatus = Self.workspaceSyncStatus(sync, invitation: activeInvitation)
+        let syncStatus = Self.workspaceSyncStatus(
+            sync,
+            invitation: activeInvitation,
+            activeInvitationStartedAt: activeInvitationStartedAt,
+            pendingClinicalConfirmations: await pendingClinicalConfirmations(
+                sync.pendingClinicalConfirmationConversationIDs,
+                client: client
+            )
+        )
 
         guard context.allowsClinicalWork,
               let conversationID = context.conversationID,
@@ -77,6 +87,12 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
         }
 
         let imagery = try await client.imageryWork(conversationID: conversationID)
+        if let imagery,
+           let method = catalog.methods.first(where: {
+               $0.nodeID == imagery.methodNodeID
+           }) {
+            imageryMethodByConversation[conversationID] = method
+        }
         let imagerySession: WorkspaceImagerySession?
         if let imagery, imagery.consentComplete {
             imageryConversationBySession[String(imagery.id)] = conversationID
@@ -93,10 +109,14 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
             clinicalIntensityLimit: catalog.intensityLimit,
             clinicalSafetyHold: catalog.safetyHold,
             chairAvailable: publishedChairMethod != nil || chair != nil,
+            chairRequiresPrecheck:
+                chairMethodByConversation[conversationID]?.riskLevel == "enhanced",
             chairUnavailableReason: publishedChairMethod == nil && chair == nil
                 ? "Bu ustanın yayımlanmış yöntem kataloğunda sandalye çalışması bulunmuyor."
                 : nil,
             imageryAvailable: publishedImageryMethod != nil || imagery != nil,
+            imageryRequiresPrecheck:
+                imageryMethodByConversation[conversationID]?.riskLevel == "enhanced",
             imageryUnavailableReason: publishedImageryMethod == nil && imagery == nil
                 ? "Bu ustanın yayımlanmış yöntem kataloğunda sınırlı yeniden ebeveynlik-imgeleme çalışması bulunmuyor."
                 : nil,
@@ -132,13 +152,21 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
                 "Bu ustanın yayımlanmış bir sandalye çalışması bulunmuyor."
             )
         }
+        try Self.validateEnhancedPrecheck(
+            method: selectedMethod,
+            intensity: request.intensity,
+            realityConfirmed: request.realityConfirmed,
+            sleepActivationClear: request.sleepActivationClear,
+            supportAvailable: request.supportAvailable
+        )
         chairMethodByConversation[conversationID] = selectedMethod
 
         var work = try await reusableChairWork(
             client: client,
             conversationID: conversationID,
             selectedMethod: selectedMethod,
-            intensity: request.intensity
+            intensity: request.intensity,
+            intensityLimit: catalog.intensityLimit
         )
         let configuration = Self.chairConfiguration(method: selectedMethod)
         guard request.participantTitles.count >= configuration.minimumParticipants,
@@ -378,13 +406,21 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
                 "Bu ustanın yayımlanmış sınırlı yeniden ebeveynlik protokolü bulunmuyor."
             )
         }
+        try Self.validateEnhancedPrecheck(
+            method: method,
+            intensity: request.intensity,
+            realityConfirmed: request.realityConfirmed,
+            sleepActivationClear: request.sleepActivationClear,
+            supportAvailable: request.supportAvailable
+        )
         imageryMethodByConversation[conversationID] = method
 
         var work = try await reusableImageryWork(
             client: client,
             conversationID: conversationID,
             method: method,
-            intensity: request.intensity
+            intensity: request.intensity,
+            intensityLimit: catalog.intensityLimit
         )
         if !work.consentComplete {
             work = try await client.mutateImageryWork(ImageryWorkMutation(
@@ -654,8 +690,19 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
     public func wifiSyncStatus() async throws -> WorkspaceWiFiSyncStatus {
         let (client, _) = try await loader.service()
         let status = try await client.deviceSyncStatus()
-        if !status.hostRunning { activeInvitation = nil }
-        return Self.workspaceSyncStatus(status, invitation: activeInvitation)
+        if !status.hostRunning {
+            activeInvitation = nil
+            activeInvitationStartedAt = nil
+        }
+        return Self.workspaceSyncStatus(
+            status,
+            invitation: activeInvitation,
+            activeInvitationStartedAt: activeInvitationStartedAt,
+            pendingClinicalConfirmations: await pendingClinicalConfirmations(
+                status.pendingClinicalConfirmationConversationIDs,
+                client: client
+            )
+        )
     }
 
     public func createWiFiSyncOffer() async throws -> WorkspaceWiFiSyncStatus {
@@ -668,11 +715,21 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
         if try await client.deviceSyncStatus().hostRunning {
             _ = try? await client.stopDeviceSyncHost()
             activeInvitation = nil
+            activeInvitationStartedAt = nil
         }
         let invitation = try await client.startDeviceSyncHost()
         activeInvitation = invitation
+        activeInvitationStartedAt = Date()
         let status = try await client.deviceSyncStatus()
-        return Self.workspaceSyncStatus(status, invitation: invitation)
+        return Self.workspaceSyncStatus(
+            status,
+            invitation: invitation,
+            activeInvitationStartedAt: activeInvitationStartedAt,
+            pendingClinicalConfirmations: await pendingClinicalConfirmations(
+                status.pendingClinicalConfirmationConversationIDs,
+                client: client
+            )
+        )
     }
 
     public func joinWiFiSync(
@@ -686,13 +743,43 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
             platform: "macos"
         )
         activeInvitation = nil
+        activeInvitationStartedAt = nil
+        let pending = result.clinicalSafetyPause ? [] :
+            await pendingClinicalConfirmations(
+                result.pendingClinicalConfirmationConversationIDs,
+                client: client
+            )
         return WorkspaceWiFiSyncStatus(
-            phase: .completed,
-            message: "Eşitleme tamamlandı. \(result.summary.received) kayıt alındı, \(result.summary.sent) kayıt gönderildi.",
+            phase: result.clinicalSafetyPause
+                ? .awaitingClinicalSafety
+                : result.clinicalConfirmationRequired
+                    ? .awaitingClinicalConfirmation : .completed,
+            message: result.clinicalSafetyMessage
+                ?? result.clinicalConfirmationMessage
+                ?? "Eşitleme tamamlandı. \(result.summary.received) kayıt alındı, \(result.summary.sent) kayıt gönderildi.",
             peerName: deviceName,
             progress: 1,
             recordsTransferred: result.summary.received + result.summary.sent,
             conflicts: result.conflicts.map(Self.workspaceConflict),
+            clinicalConfirmationRequired:
+                !result.clinicalSafetyPause
+                    && result.clinicalConfirmationRequired,
+            clinicalConfirmationDevice:
+                result.clinicalSafetyPause ? nil :
+                    result.clinicalConfirmationDevice.flatMap(
+                    WorkspaceSyncClinicalConfirmationDevice.init(rawValue:)
+                ),
+            clinicalConfirmationMessage: result.clinicalSafetyPause
+                ? nil : result.clinicalConfirmationMessage,
+            pendingClinicalConfirmations: pending,
+            pendingClinicalConfirmationCount:
+                result.clinicalSafetyPause
+                    ? 0 : result.pendingClinicalConfirmationCount,
+            clinicalSafetyPause: result.clinicalSafetyPause,
+            clinicalSafetyDevice: result.clinicalSafetyDevice.flatMap(
+                WorkspaceSyncClinicalConfirmationDevice.init(rawValue:)
+            ),
+            clinicalSafetyMessage: result.clinicalSafetyMessage,
             secretsExcluded: true,
             updatedAt: Self.date(result.lastSyncAt)
         )
@@ -702,6 +789,7 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
         let (client, _) = try await loader.service()
         _ = try await client.stopDeviceSyncHost()
         activeInvitation = nil
+        activeInvitationStartedAt = nil
         return WorkspaceWiFiSyncStatus(
             phase: .cancelled,
             message: "Yerel eşitleme daveti iptal edildi."
@@ -721,16 +809,91 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
             resolution: resolution == .keepThisMac ? .local : .remote
         )
         let status = try await client.deviceSyncStatus()
-        return Self.workspaceSyncStatus(status, invitation: activeInvitation)
+        return Self.workspaceSyncStatus(
+            status,
+            invitation: activeInvitation,
+            activeInvitationStartedAt: activeInvitationStartedAt,
+            pendingClinicalConfirmations: await pendingClinicalConfirmations(
+                status.pendingClinicalConfirmationConversationIDs,
+                client: client
+            )
+        )
+    }
+
+    public func resolveWiFiClinicalConfirmation(
+        conversationID: Int,
+        enabled: Bool
+    ) async throws -> WorkspaceWiFiSyncStatus {
+        guard conversationID > 0 else {
+            throw DivanUIClientError("Kerem Genç görüşmesi geçersiz.")
+        }
+        let (client, _) = try await loader.service()
+        let key = "\(conversationID)|\(enabled)"
+        let requestID = clinicalSyncRequestIDs[key]
+            ?? "native-sync-clinical-\(conversationID)-\(enabled ? "on" : "off")-\(UUID().uuidString.lowercased())"
+        clinicalSyncRequestIDs[key] = requestID
+        _ = try await client.mutateSchemaClinicalSync(.init(
+            conversationID: conversationID,
+            requestID: requestID,
+            enabled: enabled,
+            confirmed: true
+        ))
+        clinicalSyncRequestIDs.removeValue(forKey: key)
+        let status = try await client.deviceSyncStatus()
+        return Self.workspaceSyncStatus(
+            status,
+            invitation: activeInvitation,
+            activeInvitationStartedAt: activeInvitationStartedAt,
+            pendingClinicalConfirmations: await pendingClinicalConfirmations(
+                status.pendingClinicalConfirmationConversationIDs,
+                client: client
+            )
+        )
     }
 
     // MARK: - Core lifecycle helpers
+
+    private static func validateEnhancedPrecheck(
+        method: TechniqueMethod,
+        intensity: Int,
+        realityConfirmed: Bool,
+        sleepActivationClear: Bool,
+        supportAvailable: Bool?
+    ) throws {
+        guard method.riskLevel == "enhanced" else { return }
+        guard realityConfirmed,
+              sleepActivationClear,
+              supportAvailable != nil else {
+            throw AdvancedWorkspaceValidationError.explicitConsentRequired
+        }
+        guard (0...7).contains(intensity) else {
+            throw DivanUIClientError(
+                "Yaşantısal çalışma için başlangıç yoğunluğu 0-7 aralığında olmalı."
+            )
+        }
+    }
+
+    private func persistEnhancedPrecheckIfNeeded(
+        client: APIClient,
+        conversationID: Int,
+        method: TechniqueMethod,
+        intensity: Int,
+        intensityLimit: Int
+    ) async throws {
+        guard method.riskLevel == "enhanced" else { return }
+        try await client.recordExperientialPrecheck(
+            conversationID: conversationID,
+            intensity: intensity,
+            intensityLimit: intensityLimit
+        )
+    }
 
     private func reusableChairWork(
         client: APIClient,
         conversationID: Int,
         selectedMethod: TechniqueMethod,
-        intensity: Int
+        intensity: Int,
+        intensityLimit: Int
     ) async throws -> ChairWork {
         var collection = try await client.chairWork(
             conversationID: conversationID,
@@ -745,6 +908,13 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
                 )
             }
             if work.techniqueStatus == "proposed" {
+                try await persistEnhancedPrecheckIfNeeded(
+                    client: client,
+                    conversationID: conversationID,
+                    method: selectedMethod,
+                    intensity: intensity,
+                    intensityLimit: intensityLimit
+                )
                 _ = try await client.mutateTechniqueRun(TechniqueRunMutation(
                     conversationID: conversationID,
                     action: .consent,
@@ -778,6 +948,13 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
                 )
             }
             if open.status == "proposed" {
+                try await persistEnhancedPrecheckIfNeeded(
+                    client: client,
+                    conversationID: conversationID,
+                    method: selectedMethod,
+                    intensity: intensity,
+                    intensityLimit: intensityLimit
+                )
                 _ = try await client.mutateTechniqueRun(TechniqueRunMutation(
                     conversationID: conversationID,
                     action: .consent,
@@ -815,6 +992,13 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
             methodKey: selectedMethod.key,
             intensity: intensity
         ))
+        try await persistEnhancedPrecheckIfNeeded(
+            client: client,
+            conversationID: conversationID,
+            method: selectedMethod,
+            intensity: intensity,
+            intensityLimit: intensityLimit
+        )
         let consented = try await client.mutateTechniqueRun(TechniqueRunMutation(
             conversationID: conversationID,
             action: .consent,
@@ -837,7 +1021,8 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
         client: APIClient,
         conversationID: Int,
         method: TechniqueMethod,
-        intensity: Int
+        intensity: Int,
+        intensityLimit: Int
     ) async throws -> ImageryWork {
         if let existing = try await client.imageryWork(conversationID: conversationID),
            ["proposed", "active", "paused"].contains(existing.techniqueStatus) {
@@ -845,6 +1030,13 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
                 throw DivanUIClientError(DivanStrings.finishOpenWorkFirst)
             }
             if existing.techniqueStatus == "proposed" {
+                try await persistEnhancedPrecheckIfNeeded(
+                    client: client,
+                    conversationID: conversationID,
+                    method: method,
+                    intensity: intensity,
+                    intensityLimit: intensityLimit
+                )
                 _ = try await client.mutateTechniqueRun(TechniqueRunMutation(
                     conversationID: conversationID,
                     action: .consent,
@@ -867,6 +1059,13 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
                 throw DivanUIClientError(DivanStrings.finishOpenWorkFirst)
             }
             if open.status == "proposed" {
+                try await persistEnhancedPrecheckIfNeeded(
+                    client: client,
+                    conversationID: conversationID,
+                    method: method,
+                    intensity: intensity,
+                    intensityLimit: intensityLimit
+                )
                 _ = try await client.mutateTechniqueRun(TechniqueRunMutation(
                     conversationID: conversationID,
                     action: .consent,
@@ -888,6 +1087,13 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
             methodKey: method.key,
             intensity: intensity
         ))
+        try await persistEnhancedPrecheckIfNeeded(
+            client: client,
+            conversationID: conversationID,
+            method: method,
+            intensity: intensity,
+            intensityLimit: intensityLimit
+        )
         let consented = try await client.mutateTechniqueRun(TechniqueRunMutation(
             conversationID: conversationID,
             action: .consent,
@@ -1339,15 +1545,40 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
         return .coping
     }
 
-    private static func workspaceSyncStatus(
+    /// Kept internal so the client-side pause precedence can be pinned without
+    /// booting or inspecting a real user store.
+    static func workspaceSyncStatus(
         _ status: DeviceSyncStatus,
-        invitation: DeviceSyncInvitation?
+        invitation: DeviceSyncInvitation?,
+        activeInvitationStartedAt: Date? = nil,
+        pendingClinicalConfirmations:
+            [WorkspaceSyncClinicalConfirmation]
     ) -> WorkspaceWiFiSyncStatus {
+        let invitationSupersedesLastSummary = status.hostRunning
+            && invitation != nil
+            && status.pendingClinicalConfirmationCount == 0
+            && activeInvitationStartedAt.map { startedAt in
+                guard let value = status.lastSyncAt else { return true }
+                return date(value) < startedAt
+            } == true
         let phase: WorkspaceWiFiSyncPhase
         let message: String
         if status.busy {
             phase = .transferring
             message = "Kayıtlar aynı Wi-Fi üzerinden eşitleniyor."
+        } else if invitationSupersedesLastSummary {
+            phase = .waitingForScan
+            message = "QR kod diğer cihazdan taranmayı bekliyor."
+        } else if status.clinicalSafetyPause {
+            phase = .awaitingClinicalSafety
+            message = status.clinicalSafetyMessage
+                ?? "Şema çalışma kayıtları güvenlik beklemesi nedeniyle alınmadı."
+        } else if status.pendingClinicalConfirmationCount > 0 {
+            phase = .awaitingClinicalConfirmation
+            message = "Şema çalışma kayıtları için bu cihazın açık kararı gerekiyor."
+        } else if status.lastSummary.clinicalConfirmationRequired {
+            phase = .awaitingClinicalConfirmation
+            message = "Şema çalışma kayıtları için cihaz onayı bekleniyor."
         } else if status.hostRunning {
             phase = .waitingForScan
             message = "QR kod diğer cihazdan taranmayı bekliyor."
@@ -1374,9 +1605,59 @@ public actor CoreAdvancedWorkspaceDataSource: AdvancedWorkspaceDataSource {
             progress: status.busy ? nil : (phase == .completed ? 1 : nil),
             recordsTransferred: status.lastSummary.sent + status.lastSummary.received,
             conflicts: status.conflicts.map(workspaceConflict),
+            clinicalConfirmationRequired:
+                !invitationSupersedesLastSummary
+                    && !status.clinicalSafetyPause
+                    && (status.lastSummary.clinicalConfirmationRequired
+                        || status.pendingClinicalConfirmationCount > 0),
+            clinicalConfirmationDevice:
+                invitationSupersedesLastSummary
+                    || status.clinicalSafetyPause ? nil
+                    : status.pendingClinicalConfirmationCount > 0
+                    ? .thisDevice : nil,
+            clinicalConfirmationMessage:
+                invitationSupersedesLastSummary
+                    || status.clinicalSafetyPause ? nil
+                    : status.pendingClinicalConfirmationCount > 0
+                    ? "Şema çalışma kayıtlarını bu cihazda onaylayın veya kapalı tutun; ardından yeni bir QR ile yeniden eşitleyin."
+                    : status.lastSummary.clinicalConfirmationRequired
+                        ? "Önceki eşitleme cihaz onayı için durdu. Gerekli cihazda karar verildikten sonra yeni bir QR ile yeniden eşitleyin."
+                        : nil,
+            pendingClinicalConfirmations: status.clinicalSafetyPause
+                ? [] : pendingClinicalConfirmations,
+            pendingClinicalConfirmationCount:
+                status.clinicalSafetyPause
+                    ? 0 : status.pendingClinicalConfirmationCount,
+            clinicalSafetyPause: status.clinicalSafetyPause
+                && !invitationSupersedesLastSummary,
+            clinicalSafetyDevice: invitationSupersedesLastSummary ? nil
+                : status.clinicalSafetyDevice.flatMap(
+                    WorkspaceSyncClinicalConfirmationDevice.init(rawValue:)
+                ),
+            clinicalSafetyMessage: invitationSupersedesLastSummary
+                ? nil : status.clinicalSafetyMessage,
             secretsExcluded: status.secretsExcluded,
             updatedAt: status.lastSyncAt.map(date) ?? Date()
         )
+    }
+
+    private func pendingClinicalConfirmations(
+        _ conversationIDs: [Int],
+        client: APIClient
+    ) async -> [WorkspaceSyncClinicalConfirmation] {
+        let validIDs = Array(Set(conversationIDs.filter { $0 > 0 })).sorted()
+        guard !validIDs.isEmpty else { return [] }
+        let conversations = (try? await client.conversations(archived: false))
+            ?? []
+        let titleByID = Dictionary(
+            uniqueKeysWithValues: conversations.map { ($0.id, $0.title) }
+        )
+        return validIDs.map {
+            WorkspaceSyncClinicalConfirmation(
+                conversationID: $0,
+                title: titleByID[$0] ?? "Kerem Genç görüşmesi #\($0)"
+            )
+        }
     }
 
     private static func workspaceConflict(

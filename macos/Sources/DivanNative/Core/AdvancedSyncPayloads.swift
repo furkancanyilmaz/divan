@@ -12,11 +12,20 @@ struct SyncSummaryWire: Decodable {
     let sent: Int?
     let received: Int?
     let conflicts: Int?
+    let clinicalConfirmationRequired: Bool?
+    let clinicalSafetyPause: Bool?
+    let clinicalSafetyDevice: String?
+    let clinicalSafetyMessage: String?
 
     var model: SyncSummary {
         SyncSummary(
             sent: sent ?? 0, received: received ?? 0,
-            conflicts: conflicts ?? 0
+            conflicts: conflicts ?? 0,
+            clinicalConfirmationRequired:
+                clinicalConfirmationRequired ?? false,
+            clinicalSafetyPause: clinicalSafetyPause ?? false,
+            clinicalSafetyDevice: clinicalSafetyDevice,
+            clinicalSafetyMessage: clinicalSafetyMessage
         )
     }
 }
@@ -46,6 +55,11 @@ struct SyncStatusWire: Decodable {
     let lastPeerName: String?
     let lastSummary: SyncSummaryWire?
     let conflicts: [SyncConflictWire]?
+    let pendingClinicalConfirmationConvIds: [Int]?
+    let pendingClinicalConfirmationCount: Int?
+    let clinicalSafetyPause: Bool?
+    let clinicalSafetyDevice: String?
+    let clinicalSafetyMessage: String?
     let scope: [String]?
     let secretsExcluded: Bool?
 
@@ -57,7 +71,22 @@ struct SyncStatusWire: Decodable {
             lastSummary: lastSummary?.model ?? SyncSummary(
                 sent: 0, received: 0, conflicts: 0
             ),
-            conflicts: (conflicts ?? []).map(\.model), scope: scope ?? [],
+            conflicts: (conflicts ?? []).map(\.model),
+            pendingClinicalConfirmationConversationIDs:
+                pendingClinicalConfirmationConvIds ?? [],
+            pendingClinicalConfirmationCount:
+                pendingClinicalConfirmationCount
+                    ?? pendingClinicalConfirmationConvIds?.count ?? 0,
+            clinicalSafetyPause:
+                clinicalSafetyPause
+                    ?? lastSummary?.clinicalSafetyPause ?? false,
+            clinicalSafetyDevice:
+                clinicalSafetyDevice
+                    ?? lastSummary?.clinicalSafetyDevice,
+            clinicalSafetyMessage:
+                clinicalSafetyMessage
+                    ?? lastSummary?.clinicalSafetyMessage,
+            scope: scope ?? [],
             secretsExcluded: secretsExcluded ?? true
         )
     }
@@ -90,6 +119,15 @@ struct SyncApplyWire: Decodable {
     let summary: SyncSummaryWire?
     let lastSyncAt: String?
     let conflictRows: [SyncConflictWire]?
+    let exactEqual: Bool?
+    let clinicalConfirmationRequired: Bool?
+    let clinicalConfirmationDevice: String?
+    let clinicalConfirmationMessage: String?
+    let pendingClinicalConfirmationConvIds: [Int]?
+    let pendingClinicalConfirmationCount: Int?
+    let clinicalSafetyPause: Bool?
+    let clinicalSafetyDevice: String?
+    let clinicalSafetyMessage: String?
 
     var model: DeviceSyncApplyResult {
         DeviceSyncApplyResult(
@@ -97,7 +135,26 @@ struct SyncApplyWire: Decodable {
                 sent: 0, received: 0, conflicts: 0
             ),
             lastSyncAt: lastSyncAt ?? "",
-            conflicts: (conflictRows ?? []).map(\.model)
+            conflicts: (conflictRows ?? []).map(\.model),
+            exactEqual: exactEqual ?? false,
+            clinicalConfirmationRequired:
+                clinicalConfirmationRequired ?? false,
+            clinicalConfirmationDevice: clinicalConfirmationDevice,
+            clinicalConfirmationMessage: clinicalConfirmationMessage,
+            pendingClinicalConfirmationConversationIDs:
+                pendingClinicalConfirmationConvIds ?? [],
+            pendingClinicalConfirmationCount:
+                pendingClinicalConfirmationCount
+                    ?? pendingClinicalConfirmationConvIds?.count ?? 0,
+            clinicalSafetyPause:
+                clinicalSafetyPause
+                    ?? summary?.clinicalSafetyPause ?? false,
+            clinicalSafetyDevice:
+                clinicalSafetyDevice
+                    ?? summary?.clinicalSafetyDevice,
+            clinicalSafetyMessage:
+                clinicalSafetyMessage
+                    ?? summary?.clinicalSafetyMessage
         )
     }
 }

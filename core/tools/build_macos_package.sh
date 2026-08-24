@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="${0:A:h}"
 ROOT_DIR="${SCRIPT_DIR:h}"
 RELEASE_DIR="${ROOT_DIR:h}/releases"
-VERSION="2026.08.13.2"
+VERSION="2026.08.15.1"
 APP_NAME="Divan"
 RELEASE_NAME="Divan-macOS-${VERSION}"
 BUILD_DIR="${RELEASE_DIR}/.macos-build-${VERSION}"
@@ -43,7 +43,7 @@ done
 [[ -f "$ICON_SOURCE" ]] || fail "Uygulama simgesi bulunamadı."
 [[ -f "$LAUNCHER_SOURCE" ]] || fail "Mac başlatıcısı bulunamadı."
 [[ -f "$README_SOURCE" ]] || fail "Mac kurulum notu bulunamadı."
-rg -q '^VERSION = "2026\.08\.11\.3"$' "${ROOT_DIR}/server.py" || \
+rg -q '^VERSION = "2026\.08\.15\.1"$' "${ROOT_DIR}/server.py" || \
   fail "server.py sürümü paket sürümüyle eşleşmiyor."
 
 for item in "${RUNTIME_FILES[@]}"; do
@@ -51,6 +51,33 @@ for item in "${RUNTIME_FILES[@]}"; do
 done
 [[ -f "${ROOT_DIR}/assets/portraits/manifest.json" ]] || \
   fail "Portre manifesti eksik."
+[[ -f "${ROOT_DIR}/assets/imagery/manifest.json" ]] || \
+  fail "Freud imgeleme manifesti eksik."
+python3 - "${ROOT_DIR}/assets/imagery" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+cards = manifest.get("cards")
+if manifest.get("card_count") != 24 or not isinstance(cards, list) or len(cards) != 24:
+    raise SystemExit("Freud imgeleme manifesti geçersiz.")
+expected = {"manifest.json"}
+for card in cards:
+    filename = card.get("file") if isinstance(card, dict) else None
+    if not isinstance(filename, str) or pathlib.PurePath(filename).name != filename or not filename.endswith(".webp"):
+        raise SystemExit("Freud imgeleme manifestinde geçersiz dosya adı var.")
+    data = (root / filename).read_bytes()
+    if data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise SystemExit("Freud imgeleme kartı WebP değil.")
+    if card.get("bytes") != len(data) or card.get("sha256") != hashlib.sha256(data).hexdigest():
+        raise SystemExit("Freud imgeleme kartı manifestle uyuşmuyor.")
+    expected.add(filename)
+if expected != {path.name for path in root.iterdir() if path.is_file()}:
+    raise SystemExit("Freud imgeleme destesinde eksik/fazla dosya var.")
+PY
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" \
@@ -91,6 +118,7 @@ for item in "${RUNTIME_FILES[@]}"; do
   cp -p "${ROOT_DIR}/${item}" "${RESOURCE_DIR}/${item}"
 done
 cp -R "${ROOT_DIR}/assets/portraits" "${RESOURCE_DIR}/assets/portraits"
+cp -R "${ROOT_DIR}/assets/imagery" "${RESOURCE_DIR}/assets/imagery"
 
 TIFF_PARTS=()
 for size in 16 32 48 128 256 512 1024; do

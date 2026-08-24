@@ -1,5 +1,7 @@
 from http.cookies import SimpleCookie
+import hashlib
 from pathlib import Path
+import re
 import unittest
 from urllib.parse import urlencode
 
@@ -35,11 +37,59 @@ class AndroidKeyboardInsetsSourceTests(unittest.TestCase):
         self.assertIn("WindowInsetsCompat.Type.displayCutout()", self.java)
         self.assertIn(".setInsets(safeTypes, Insets.NONE)", self.java)
         self.assertNotIn("getSystemWindowInsetBottom()", self.java)
-        self.assertNotIn("WindowInsetsCompat.Type.ime()", self.java)
+        self.assertIn("insets.isVisible(", self.java)
+        self.assertIn("WindowInsetsCompat.Type.ime()", self.java)
+        self.assertNotIn("insets.getInsets(WindowInsetsCompat.Type.ime())",
+                         self.java)
         self.assertIn("public void showKeyboard()", self.java)
         self.assertIn("keyboard.showSoftInput(", self.java)
         self.assertIn("webView.setOnScrollChangeListener(", self.java)
         self.assertIn("view.post(() -> view.scrollTo(0, 0))", self.java)
+
+    def test_native_viewport_height_is_read_only_and_adds_no_ime_padding(self):
+        self.assertIn(
+            "private volatile int mobileViewportHeightCss = 0;", self.java)
+        self.assertIn("view.addOnLayoutChangeListener(", self.java)
+        self.assertIn("Math.round(heightPx / density)", self.java)
+        self.assertIn("public int mobileViewportHeight()", self.java)
+        self.assertIn("return Math.max(0, mobileViewportHeightCss);", self.java)
+        self.assertIn("public boolean mobileImeVisible()", self.java)
+        self.assertIn("public boolean mobileImeStateKnown()", self.java)
+        self.assertIn("dispatchMobileViewportState()", self.java)
+        self.assertIn("window.divanAndroidViewportChanged", self.java)
+        self.assertNotIn("setPadding(0, 0, 0, mobileViewportHeightCss)",
+                         self.java)
+        self.assertIn("DivanNative.mobileViewportHeight()", self.html)
+        self.assertIn("DivanNative.mobileImeVisible()", self.html)
+        self.assertIn("DivanNative.mobileImeStateKnown()", self.html)
+
+    def test_foreground_forces_post_layout_viewport_resample(self):
+        refresh = self.java[
+            self.java.index("private void refreshMobileViewportState()"):
+            self.java.index("private void dispatchMobileViewportState()")
+        ]
+        self.assertIn("ViewCompat.requestApplyInsets(currentRoot)", refresh)
+        self.assertIn("getWindow().getDecorView().requestLayout()", refresh)
+        self.assertIn("currentRoot.requestLayout()", refresh)
+        self.assertIn("current.requestLayout()", refresh)
+        self.assertIn("addOnPreDrawListener", refresh)
+        self.assertIn("ViewCompat.getRootWindowInsets(currentRoot)", refresh)
+        self.assertIn("measureMobileViewportHeightCss(current)", refresh)
+        self.assertIn("dispatchMobileViewportState()", refresh)
+        resume = self.java[
+            self.java.index("protected void onResume()"):
+            self.java.index("protected void onStop()")
+        ]
+        self.assertIn("refreshMobileViewportState()", resume)
+        self.assertIn("onWindowFocusChanged(boolean hasFocus)", resume)
+        self.assertIn("if (hasFocus)", resume)
+        page_finished = self.java[
+            self.java.index("public void onPageFinished("):
+            self.java.index("public void onReceivedError(")
+        ]
+        self.assertIn("refreshMobileViewportState()", page_finished)
+        self.assertNotIn("dispatchMobileViewportState()", page_finished)
+        self.assertIn("mobileImeStateKnown = false", self.java)
 
     def test_recents_preview_is_private_and_secret_writes_are_synchronous(self):
         self.assertIn("setRecentsScreenshotEnabled(false)", self.java)
@@ -58,9 +108,10 @@ class AndroidKeyboardInsetsSourceTests(unittest.TestCase):
         self.assertIn("android.permission.POST_NOTIFICATIONS", self.manifest)
         self.assertIn('id="replyNotificationToggle"', self.html)
         self.assertIn("setReplyNotificationsEnabled(", self.html)
-        self.assertIn("function signalNativePendingWork()", self.html)
+        self.assertIn("function signalNativePendingWork(minPending=0)",
+                      self.html)
         self.assertIn(
-            "Math.max(pendingJobCount(),pendingChatDeliveryCount())",
+            "Math.max(forced,pendingJobCount(),pendingChatDeliveryCount())",
             self.html,
         )
         self.assertIn("android.permission.RECEIVE_BOOT_COMPLETED",
@@ -88,6 +139,27 @@ class AndroidKeyboardInsetsSourceTests(unittest.TestCase):
                       "localCookieHeader())", self.java)
         self.assertIn("CookieManager.getInstance().getCookie(baseUrl)",
                       self.java)
+
+    def test_embedded_session_cookie_is_http_only_and_installed_before_load(self):
+        self.assertIn('"; Path=/; HttpOnly; SameSite=Strict"', self.java)
+        self.assertIn("cookies.setCookie(baseUrl, cookie, installed -> {",
+                      self.java)
+        self.assertIn("Boolean.TRUE.equals(installed)", self.java)
+        self.assertLess(
+            self.java.index("cookies.setCookie(baseUrl, cookie, installed -> {"),
+            self.java.index("webView.loadUrl(baseUrl);"),
+        )
+        self.assertNotIn(".removeSessionCookies(", self.java)
+
+    def test_main_frame_failures_cannot_reveal_a_raw_http_error_page(self):
+        self.assertIn("mainFrameLoadFailed = false", self.java)
+        self.assertIn("public void onReceivedHttpError(", self.java)
+        self.assertIn("if (!request.isForMainFrame())", self.java)
+        self.assertIn("mainFrameLoadFailed = true", self.java)
+        self.assertIn(
+            'if (!mainFrameLoadFailed && isLocal(uri)',
+            self.java,
+        )
 
     def test_json_transfer_files_use_json_mime_in_native_file_picker(self):
         self.assertIn('endsWith(".json")', self.java)
@@ -189,14 +261,29 @@ class AndroidPackagingConsistencyTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_android_release_version_and_output_name_are_consistent(self):
-        self.assertIn("versionCode = 2026081002", self.gradle)
-        self.assertIn('versionName = "2026.08.10.2"', self.gradle)
-        self.assertIn('VERSION="2026.08.10.2"', self.command)
+        self.assertIn("versionCode = 2026082214", self.gradle)
+        self.assertIn('versionName = "2026.08.22.14"', self.gradle)
+        self.assertIn('VERSION="2026.08.22.14"', self.command)
+        self.assertIn(
+            "./gradlew clean verifyDivanEmbedding lintRelease assembleRelease",
+            self.command,
+        )
         self.assertIn('Divan-Android-$VERSION.apk', self.command)
-        self.assertIn("Divan-Android-2026.08.10.2.apk", self.readme)
-        self.assertIn("versionCode 2026081002", self.readme)
+        self.assertIn("Divan-Android-2026.08.22.14.apk", self.readme)
+        self.assertIn("versionCode 2026082214", self.readme)
 
-    def test_android_build_guards_exact_common_sources_and_sync_v2(self):
+    def test_android_readme_describes_tus_as_an_adhd_chat_mode(self):
+        self.assertIn("**+ → TUS Çalışma**", self.readme)
+        self.assertIn("ayrı bir çalışma alanına geçmez", self.readme)
+        self.assertIn("sohbet balonlarında sorar", self.readme)
+        self.assertIn("yanıtları da aynı konuşmada balon", self.readme)
+        self.assertIn(
+            "uzun ders ve konu listeleri küçük bir seçim penceresi",
+            self.readme,
+        )
+        self.assertIn("(popup) olarak açılabilir", self.readme)
+
+    def test_android_build_guards_exact_common_sources_fixture_and_sync_v8(self):
         for required in (
                 '"server.py"', '"index.html"',
                 '"secure_sync_transport.py"', '"sync_engine.py"',
@@ -205,13 +292,47 @@ class AndroidPackagingConsistencyTests(unittest.TestCase):
                 self.assertIn(required, self.gradle)
         self.assertIn("val verifyDivanEmbedding", self.gradle)
         self.assertIn("dependsOn(syncDivanSources)", self.gradle)
+        self.assertIn("val expectedCommonSha256 = mapOf(", self.gradle)
+        self.assertIn("sha256(source) == expectedDigest", self.gradle)
+        self.assertIn("sha256(embedded) == expectedDigest", self.gradle)
         self.assertIn("source.readBytes().contentEquals", self.gradle)
-        self.assertIn("BATCH_VERSION\\s*=\\s*2", self.gradle)
+        self.assertIn("expectedSchemaPathContractSha256", self.gradle)
+        self.assertIn(
+            "30e2cac7c8ced6e58a3f8860ea887f1f1e6f42cb888d21da6bcaad7803294197",
+            self.gradle,
+        )
+        self.assertIn("sha256(schemaPathContractFixture) ==", self.gradle)
+        self.assertIn('include("assets/imagery/**")', self.gradle)
+        self.assertIn("sourceCards.size == 24", self.gradle)
+        self.assertIn('String(header, 8, 4, Charsets.US_ASCII) == "WEBP"',
+                      self.gradle)
+        self.assertIn("BATCH_VERSION\\s*=\\s*8", self.gradle)
         self.assertIn("dependsOn(verifyDivanEmbedding)", self.gradle)
 
         source_sync = Path(PROJECT_DIR, "sync_engine.py").read_text(
             encoding="utf-8")
-        self.assertIn("BATCH_VERSION = 2", source_sync)
+        self.assertIn("BATCH_VERSION = 8", source_sync)
+        self.assertIn("Eşitleme protokolü v8", self.readme)
+        self.assertIn("schema_path_chat_v5", self.readme)
+        self.assertNotIn("eşitleme protokolünün v5", self.readme)
+
+        expected = dict(re.findall(
+            r'"([^"\\]+)"\s+to\s+"([0-9a-f]{64})"',
+            self.gradle,
+        ))
+        self.assertEqual(set(expected), {
+            "server.py", "index.html", "secure_sync_transport.py",
+            "sync_engine.py", "sync_service.py", "sync_qr.py",
+            "qrcodegen.py",
+        })
+        embedded_root = self.android / "app/src/main/python"
+        for name, digest in expected.items():
+            with self.subTest(name=name):
+                source = Path(PROJECT_DIR, name)
+                embedded = embedded_root / name
+                self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),
+                                 digest)
+                self.assertEqual(source.read_bytes(), embedded.read_bytes())
 
     def test_android_build_rejects_databases_and_embedded_keys(self):
         self.assertIn("fileTree(androidPackageSourceRoot)", self.gradle)

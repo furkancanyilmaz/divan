@@ -89,11 +89,29 @@ class LivingMapUISourceTests(unittest.TestCase):
         self.assertIn('refreshLivingMapBadge();', self.html)
         self.assertIn("loadLivingMap({loading:false});", self.html)
 
+    def test_historical_scan_is_turn_based_and_skips_unsafe_partial_content(self):
+        for field in (
+                "eligible_turn_count", "analyzed_turn_count",
+                "remaining_turn_count", "failed_turn_count",
+                "safety_skipped_turn_count"):
+            self.assertIn(field, self.html)
+        for copy in (
+                "Her tamamlanmış kullanıcı–usta mesaj çifti ayrı incelenir",
+                "yarım yanıtlar ve özel/modelden çıkarılmış turlar atlanır",
+                "tur tur gönderileceğini",
+                "Geçmiş turları incelemeyi başlat"):
+            self.assertIn(copy, self.html)
+        self.assertNotIn("Her görüşme ayrı incelenir", self.html)
+        self.assertNotIn("görüşme görüşme gönderileceğini", self.html)
+
     def test_active_order_is_applied_to_desktop_and_mobile_lists(self):
         self.assertIn('function orderActiveConversationRows(rows)', self.html)
         self.assertIn(
-            'const orderedRows=orderActiveConversationRows(rows);',
+            "const orderedRows=mobileConversationView==='archived'\n"
+            "      ?[...(Array.isArray(rows)?rows:[])]:"
+            "orderActiveConversationRows(rows);",
             self.html)
+        self.assertIn('latestMobileConversationRows(orderedRows)', self.html)
         self.assertIn(
             "const orderedRows=requestedView==='archived'\n    ?rows:orderActiveConversationRows(rows);",
             self.html)

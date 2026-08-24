@@ -30,7 +30,7 @@ class SafetyReviewUISourceTests(HTTPTestCase):
         self.assertIn("current_status:currentStatus,confirmed:true", body)
         self.assertIn("if(note)payload.note=note", body)
         self.assertIn("await api('/api/safety-hold/review',payload)", body)
-        self.assertIn("convData.safety_hold=hold", body)
+        self.assertIn("setConversationSafetyHold(hold)", body)
         self.assertIn("['not_sure','unsafe_now'].includes(currentStatus)", body)
         self.assertIn("önceki olay kaydı korunarak", body)
 

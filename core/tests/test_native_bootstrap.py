@@ -65,7 +65,7 @@ class NativeBootstrapContractTests(HTTPTestCase):
         self.assertEqual(set(payload["settings"]), {
             "context_window_tokens", "context_window_options",
             "privacy_seen", "pin_set", "retention_days", "simple_mode",
-            "credential_storage",
+            "guest_mode", "credential_storage",
         })
         self.assertEqual(payload["settings"]["context_window_tokens"], 65536)
         self.assertEqual(
@@ -75,6 +75,7 @@ class NativeBootstrapContractTests(HTTPTestCase):
         self.assertFalse(payload["settings"]["pin_set"])
         self.assertEqual(payload["settings"]["retention_days"], 30)
         self.assertTrue(payload["settings"]["simple_mode"])
+        self.assertFalse(payload["settings"]["guest_mode"])
 
     def test_capabilities_are_versioned_from_backend_protocol_constants(self):
         status, payload, _ = self.request("GET", "/api/v1/bootstrap")
@@ -85,7 +86,8 @@ class NativeBootstrapContractTests(HTTPTestCase):
             "app_lock", "backup_restore", "background_chat", "chair_work",
             "conversation_batch_actions", "conversation_message_paging",
             "device_sync", "imagery_work", "living_map",
-            "provider_connection_test", "session_lifecycle", "therapy_map",
+            "notification_reply", "provider_connection_test", "reminders",
+            "schema_path", "session_lifecycle", "therapy_map",
         })
         self.assertEqual(capabilities["chair_work"], {
             "protocol_version": app.CHAIR_PROTOCOL_VERSION,
@@ -95,6 +97,17 @@ class NativeBootstrapContractTests(HTTPTestCase):
         })
         self.assertEqual(capabilities["living_map"], {
             "version": app.LIVING_MAP_VERSION,
+            "analysis_unit": "completed_user_assistant_turn",
+            "turn_backfill": True,
+        })
+        self.assertEqual(capabilities["schema_path"], {
+            "version": app.SCHEMA_PATH_VERSION,
+            "explicit_mode": True,
+            "turn_analysis": True,
+            "controlled_candidates": True,
+        })
+        self.assertEqual(capabilities["notification_reply"], {
+            "version": 1,
         })
         self.assertEqual(capabilities["therapy_map"], {
             "version": app.THERAPY_MAP_VERSION,

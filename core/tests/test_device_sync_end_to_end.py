@@ -54,6 +54,7 @@ def _host_process(database_path, output):
         host_sync.shutdown()
         output.put(("result", {
             "titles": titles, "messages": messages, "secret": secret,
+            "last_summary": host_sync.status()["last_summary"],
         }))
     except Exception as error:
         output.put(("error", "{}: {}".format(
@@ -108,6 +109,8 @@ class DeviceSyncEndToEndTests(unittest.TestCase):
                     value, device_name="Test telefonu",
                     platform_name="android")
                 self.assertTrue(summary["ok"])
+                self.assertTrue(summary["exact_equal"])
+                self.assertTrue(summary["summary"]["exact_equal"])
 
                 kind, host_result = output.get(timeout=20)
                 self.assertEqual(kind, "result", host_result)
@@ -135,6 +138,8 @@ class DeviceSyncEndToEndTests(unittest.TestCase):
                     host_result["messages"], expected_messages)
                 self.assertEqual(client_secret, "client-secret")
                 self.assertEqual(host_result["secret"], "host-secret")
+                self.assertTrue(
+                    host_result["last_summary"]["exact_equal"])
             finally:
                 client_sync.shutdown()
                 client_app.DB_PATH = old_path

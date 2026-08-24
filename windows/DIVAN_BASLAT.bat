@@ -4,7 +4,8 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title DIVAN - Ustalarla Terapi ve Ders
 
-set "APP_VERSION=2026.07.30.2"
+set "APP_VERSION=2026.08.17.5"
+set "CORE_VERSION=2026.08.15.1"
 set "APP_DIR=%~dp0Sistem_Dosyalari"
 set "PYTHON_EXE=%APP_DIR%\python\python.exe"
 set "PORT=8778"
@@ -79,7 +80,7 @@ if errorlevel 1 (
 del /q "%DATA_DIR%\divan-yazma-testi.tmp" >nul 2>nul
 
 rem Yalniz bu Windows paketinin ayni surumu zaten aciksa onu kullan.
-powershell -NoProfile -Command "try { $r = Invoke-RestMethod -TimeoutSec 2 'http://127.0.0.1:8778/api/settings'; if ($r.version -eq '2026.07.30.2') { Start-Process 'http://127.0.0.1:8778/'; exit 0 }; exit 2 } catch { exit 1 }" >nul 2>nul
+powershell -NoProfile -Command "try { $r = Invoke-RestMethod -TimeoutSec 2 'http://127.0.0.1:8778/api/settings'; if ($r.version -eq '%CORE_VERSION%') { Start-Process 'http://127.0.0.1:8778/'; exit 0 }; exit 2 } catch { exit 1 }" >nul 2>nul
 set "SERVER_CHECK=%ERRORLEVEL%"
 if "%SERVER_CHECK%"=="0" exit /b 0
 

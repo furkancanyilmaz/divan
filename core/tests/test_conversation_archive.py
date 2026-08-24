@@ -563,6 +563,7 @@ class ConversationArchiveUISourceTests(unittest.TestCase):
     def test_mobile_selection_uses_guarded_long_press_and_atomic_actions(self):
         self.assertIn('id="mobileConversationSelectionBar"', self.html)
         self.assertIn('id="mobileConversationArchiveSelected"', self.html)
+        self.assertIn('id="mobileConversationPinSelected"', self.html)
         self.assertIn('id="mobileConversationDeleteSelected"', self.html)
         self.assertIn(
             "state.timer=setTimeout(()=>{", self.html)
@@ -571,30 +572,45 @@ class ConversationArchiveUISourceTests(unittest.TestCase):
             "Math.hypot(event.clientX-state.startX,"
             "event.clientY-state.startY)>10", self.html)
         self.assertIn(
-            "action:'archive',ids", self.html)
+            "const action=restoring?'restore':'archive';", self.html)
+        self.assertIn("{action,ids}", self.html)
+        self.assertIn(
+            "const action=shouldPin?'pin':'unpin';", self.html)
+        self.assertIn("result.pinned!==shouldPin", self.html)
         self.assertIn(
             "if(mobileHomeIsOpen()&&mobileConversationSelectionMode)",
             self.html)
 
-    def test_mobile_home_groups_each_master_and_exposes_older_conversations(self):
+    def test_mobile_home_shows_one_latest_row_and_history_in_chat_overflow(self):
         self.assertIn("function groupMobileConversations(rows)", self.html)
         self.assertIn("mobileConversationGroupKey(row)", self.html)
-        self.assertIn("group.rows.slice(1).forEach", self.html)
-        self.assertIn("className='mobileConversationExpand'", self.html)
-        self.assertIn("expander.setAttribute('aria-controls'", self.html)
-        self.assertIn("history.setAttribute('role','list')", self.html)
+        self.assertIn("function latestMobileConversationRows(rows)", self.html)
+        loader = self.html[
+            self.html.index("async function loadMobileHomeConversations()"):
+            self.html.index("function mobileMasterHistoryStamp(")]
+        self.assertIn("const latestRows=latestMobileConversationRows(orderedRows)",
+                      loader)
+        self.assertIn("latestRows.forEach(latest=>", loader)
+        self.assertNotIn("group.rows.slice(1)", loader)
+        self.assertIn('id="mobileMasterHistoryOpen"', self.html)
+        self.assertIn('id="mobileMasterHistoryOverlay"', self.html)
+        self.assertIn("async function showMobileMasterHistory()", self.html)
+        self.assertIn("api('/api/conversations?archived=1')", self.html)
 
     def test_active_order_has_desktop_and_grouped_mobile_safeguards(self):
+        compact = "".join(self.html.split())
         self.assertIn(
             "function orderActiveConversationRows(rows)", self.html)
         self.assertIn(
             "Number(!!(a&&a.ended))-Number(!!(b&&b.ended))", self.html)
         self.assertIn(
-            "const orderedRows=orderActiveConversationRows(rows);",
-            self.html)
+            "constorderedRows=mobileConversationView==='archived'?"
+            "[...(Array.isArray(rows)?rows:[])]:"
+            "orderActiveConversationRows(rows);", compact)
         self.assertIn(
-            "const groups=groupMobileConversations(orderedRows);",
+            "const latestRows=latestMobileConversationRows(orderedRows);",
             self.html)
+        self.assertIn("latestRows.forEach(latest=>", self.html)
         self.assertIn(
             "?rows:orderActiveConversationRows(rows);", self.html)
 

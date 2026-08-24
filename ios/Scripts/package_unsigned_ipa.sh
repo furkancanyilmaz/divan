@@ -3,7 +3,7 @@ set -eu
 
 PROJECT_DIR="${PROJECT_DIR:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
 APP_PATH="${1:-}"
-OUTPUT_PATH="${2:-$PROJECT_DIR/dist/Divan-iOS-2026.08.10.2-Standalone-Unsigned.ipa}"
+OUTPUT_PATH="${2:-$PROJECT_DIR/dist/Divan-iOS-2026.08.17.5-Standalone-Unsigned.ipa}"
 case "$OUTPUT_PATH" in
     /*) ;;
     *) OUTPUT_PATH="$(pwd)/$OUTPUT_PATH" ;;

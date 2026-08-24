@@ -4,14 +4,24 @@ public struct DivanRootView: View {
     @ObservedObject private var model: DivanViewModel
     @Environment(\.dynamicTypeSize) private var inheritedDynamicTypeSize
     private let advancedDataSource: any AdvancedWorkspaceDataSource
+    private let structuredDataSource: (any StructuredTherapyDataSource)?
     @State private var compactDetailVisible = false
+    @State private var guestConfirm: GuestModeConfirmation?
+
+    private enum GuestModeConfirmation: String, Identifiable {
+        case enter
+        case exit
+        var id: String { rawValue }
+    }
 
     public init(
         model: DivanViewModel,
-        advancedDataSource: any AdvancedWorkspaceDataSource
+        advancedDataSource: any AdvancedWorkspaceDataSource,
+        structuredDataSource: (any StructuredTherapyDataSource)? = nil
     ) {
         self.model = model
         self.advancedDataSource = advancedDataSource
+        self.structuredDataSource = structuredDataSource
     }
 
     public var body: some View {
@@ -43,6 +53,30 @@ public struct DivanRootView: View {
         }
         .sheet(isPresented: $model.isNewSessionPresented) {
             NewSessionSheet(model: model)
+        }
+        .alert(item: $guestConfirm) { confirmation in
+            switch confirmation {
+            case .enter:
+                return Alert(
+                    title: Text("Misafir moduna geçilsin mi?"),
+                    message: Text("Misafir modunda görüşmeleriniz gizlenir; yeni görüşmeler ayrı tutulur. Moddan çıkınca misafir görüşmeleri silinir."),
+                    primaryButton: .cancel(Text("Vazgeç")),
+                    secondaryButton: .default(Text("Misafir moduna geç")) {
+                        Task { await model.setGuestMode(active: true) }
+                    }
+                )
+            case .exit:
+                return Alert(
+                    title: Text("Misafir modundan çıkılsın mı?"),
+                    message: Text("Bu modda açılan tüm misafir görüşmeleri silinecek. Kendi görüşmeleriniz silinmez."),
+                    primaryButton: .cancel(Text("Vazgeç")),
+                    secondaryButton: .destructive(
+                        Text("Çık ve misafir görüşmelerini sil")
+                    ) {
+                        Task { await model.setGuestMode(active: false) }
+                    }
+                )
+            }
         }
         .onChange(of: model.destination) { destination in
             compactDetailVisible = destination == .settings || destination == .sync
@@ -140,10 +174,43 @@ public struct DivanRootView: View {
     }
 
     private var primaryColumn: some View {
-        browserColumn
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            if model.guestModeActive {
+                guestModeBanner
+            }
+            browserColumn
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
         .background(.bar)
         .accessibilityIdentifier("divan.primaryColumn")
+    }
+
+    private var guestModeBanner: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "person.crop.circle.badge.checkmark")
+                .foregroundStyle(DivanPalette.wine)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Misafir modunda")
+                    .font(.callout.weight(.semibold))
+                Text("Görüşmeleriniz gizli; çıkınca misafir görüşmeleri silinir.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 6)
+            Button("Çık") {
+                guestConfirm = .exit
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(model.isTogglingGuestMode)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(DivanPalette.wine.opacity(0.10))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("divan.guestModeBanner")
     }
 
     @ToolbarContentBuilder
@@ -313,14 +380,33 @@ public struct DivanRootView: View {
                 destinationButton(.livingMap)
             }
             Section("Defter") {
-                destinationButton(.notebook)
-                destinationButton(.letters)
-                destinationButton(.dreams)
+                if !model.guestModeActive {
+                    destinationButton(.notebook)
+                    destinationButton(.letters)
+                    destinationButton(.dreams)
+                }
             }
             Section("Divan") {
-                destinationButton(.profile)
+                if !model.guestModeActive {
+                    destinationButton(.profile)
+                }
                 destinationButton(.sync)
                 destinationButton(.settings)
+            }
+            Section("Misafir") {
+                Button {
+                    guestConfirm = model.guestModeActive ? .exit : .enter
+                } label: {
+                    Label(
+                        model.guestModeActive
+                            ? "Misafir modundan çık"
+                            : "Misafir moduna geç",
+                        systemImage: model.guestModeActive
+                            ? "person.crop.circle.badge.xmark"
+                            : "person.crop.circle.badge.plus"
+                    )
+                }
+                .disabled(model.isTogglingGuestMode)
             }
         } label: {
             Image(systemName: "square.grid.2x2")
@@ -430,6 +516,7 @@ public struct DivanRootView: View {
         let clinicalContext = conversation != nil && master?.kind == .therapist
         return AdvancedWorkspaceView(
             dataSource: advancedDataSource,
+            structuredDataSource: structuredDataSource,
             context: AdvancedWorkspaceContext(
                 conversationID: conversation?.id,
                 masterID: master?.id,

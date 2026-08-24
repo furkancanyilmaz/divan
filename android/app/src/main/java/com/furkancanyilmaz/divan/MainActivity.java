@@ -3,10 +3,7 @@ package com.furkancanyilmaz.divan;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ActivityNotFoundException;
@@ -14,14 +11,21 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.inputmethod.InputMethodManager;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
@@ -38,6 +42,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -46,7 +51,9 @@ import android.widget.Toast;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.chaquo.python.PyObject;
 import com.chaquo.python.Python;
@@ -81,6 +88,9 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_OPEN_FILE = 4101;
     private static final int REQUEST_SAVE_FILE = 4102;
     private static final int REQUEST_NOTIFICATION_PERMISSION = 4103;
+    private static final String NATIVE_VISUAL_PREFS =
+            "divan_native_visual";
+    private static final String NATIVE_THEME_KEY = "chrome_theme";
     private static final int MAX_NATIVE_TEXT_BYTES = 32 * 1024 * 1024;
     private static final int MAX_CLIPBOARD_TEXT_BYTES = 256 * 1024;
     private static final int MAX_STORY_PAGES = 8;
@@ -93,12 +103,6 @@ public final class MainActivity extends Activity {
             24L * 60L * 60L * 1000L;
     private static final String PNG_DATA_PREFIX =
             "data:image/png;base64,";
-    private static final String APP_PREFERENCES = "divan_android_settings";
-    private static final String REPLY_NOTIFICATIONS_KEY =
-            "neutral_completion_notifications";
-    private static final String REPLY_NOTIFICATION_CHANNEL =
-            "divan_neutral_updates";
-    private static final int REPLY_NOTIFICATION_ID = 2811;
     private static final byte[] PNG_SIGNATURE = new byte[] {
             (byte) 0x89, 0x50, 0x4e, 0x47,
             0x0d, 0x0a, 0x1a, 0x0a
@@ -111,31 +115,59 @@ public final class MainActivity extends Activity {
 
     private FrameLayout root;
     private WebView webView;
+    private volatile int mobileViewportHeightCss = 0;
+    private volatile boolean mobileImeVisible = false;
+    private volatile boolean mobileImeStateKnown = false;
+    private int mobileViewportRefreshGeneration = 0;
     private LinearLayout statusPanel;
+    private ImageView statusMark;
     private TextView statusText;
     private Button retryButton;
+    private ProgressBar loadingProgress;
+    private int nativeBackground = Color.rgb(247, 241, 230);
+    private int nativeForeground = Color.rgb(58, 43, 39);
+    private int nativeAccent = Color.rgb(87, 35, 48);
     private ValueCallback<Uri[]> fileChooserCallback;
     private PendingSave pendingSave;
     private GmsBarcodeScanner syncQrScanner;
     private boolean syncQrScanInProgress;
     private int serverPort = -1;
     private String sessionToken = "";
+    private int sessionCookieGeneration = 0;
+    private boolean mainFrameLoadFailed = false;
     private OnBackInvokedCallback backInvokedCallback;
     private volatile boolean activityVisible = false;
     private volatile int pendingWebWork = 0;
     private volatile int backgroundPollGeneration = 0;
+    private volatile int pendingOpenConversationId = 0;
+    private volatile boolean needsAppLookupInFlight = false;
+    private volatile String needsAppPromptedRequestId = "";
+    private volatile boolean notificationPermissionForCompletion = false;
+    private volatile boolean notificationPermissionForReminder = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // The manifest's starting theme owns the branded launch window. The
+        // real activity switches away from it before any content is inflated.
+        setTheme(R.style.Theme_Divan);
         super.onCreate(savedInstanceState);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             // Keep conversation previews out of Android's recent-apps screen
             // without blocking deliberate in-app story export or screenshots.
             setRecentsScreenshotEnabled(false);
         }
-        createReplyNotificationChannel();
-        getWindow().setStatusBarColor(Color.rgb(23, 18, 15));
-        getWindow().setNavigationBarColor(Color.rgb(23, 18, 15));
+        CompletionNotificationController.ensureChannels(this);
+        ChatNotificationController.ensureChannel(this);
+        ReminderReceiver.ensureChannel(this);
+        // Uygulama açılışında görev alarmlarını kalıcı kayıttan tazele:
+        // uygulama kapatılmış veya cihaz yeniden başlamışsa hatırlatıcılar
+        // bu yolla kaybolmaz. (BootReminderRescheduler açılışsız durumları,
+        // burası her normal açılışı kapsar.)
+        ReminderReceiver.rescheduleAll(getApplicationContext());
+        // Web başlığı sistem çubuklarının arkasına doğal biçimde uzanır;
+        // güvenli alanı aşağıdaki tek inset dinleyicisi uygular.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        applySystemChromeTheme(savedSystemChromeTheme());
 
         createLayout();
         configureWebView();
@@ -146,12 +178,181 @@ public final class MainActivity extends Activity {
                     backInvokedCallback);
         }
         SecretStore.initialize(getApplicationContext());
+        handleConversationIntent(getIntent());
         startDivan();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleConversationIntent(intent);
+        if (webView != null && webView.getVisibility() == View.VISIBLE) {
+            webView.post(this::injectPendingConversationOpen);
+        }
+    }
+
+    private void handleConversationIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        int conversationId = intent.getIntExtra(
+                ChatNotificationController.EXTRA_CONVERSATION_ID, 0);
+        if (conversationId > 0) {
+            pendingOpenConversationId = conversationId;
+        }
+    }
+
+    private void injectPendingConversationOpen() {
+        int conversationId = pendingOpenConversationId;
+        if (conversationId <= 0 || webView == null) {
+            return;
+        }
+        webView.evaluateJavascript(
+                "window.divanOpenConversation"
+                        + "?window.divanOpenConversation("
+                        + conversationId + "):false",
+                value -> {
+                    if (!"true".equals(value)) {
+                        // PIN kilidi veya henüz hazır olmayan web ekranı:
+                        // kimliği tüketme; açılış/unlock sonrasında yeniden
+                        // denenecek.
+                        return;
+                    }
+                    if (pendingOpenConversationId == conversationId) {
+                        pendingOpenConversationId = 0;
+                    }
+                    ChatNotificationController.dismiss(
+                            MainActivity.this, conversationId);
+                    CompletionNotificationController.dismiss(
+                            MainActivity.this);
+                    // divanOpenConversation fetch'i asenkrondur. Güvenlik
+                    // kapısında kalan yanıtı ancak görüşme yerleşince ve PIN
+                    // kilidi gerçekten açıldıktan sonra kullanıcıya sor.
+                    webView.postDelayed(
+                            () -> surfaceNeedsAppReply(conversationId),
+                            350L);
+                });
+    }
+
+    /**
+     * Launcher açılışı da bildirim dokunuşu gibi bekleyen güvenlik yanıtını
+     * ilgili görüşmeye götürür. Burada yalnız conv id belleğe alınır; mesaj
+     * Intent, preference veya log'a kopyalanmaz.
+     */
+    private void queueNeedsAppConversationOpen() {
+        if (needsAppLookupInFlight || webView == null) {
+            return;
+        }
+        if (pendingOpenConversationId > 0) {
+            injectPendingConversationOpen();
+            return;
+        }
+        needsAppLookupInFlight = true;
+        ioExecutor.execute(() -> {
+            NotificationReplyOutbox.Record record =
+                    NotificationReplyOutbox.firstNeedsApp(
+                            getApplicationContext(), 0);
+            int conversationId = record == null
+                    ? 0 : record.conversationId;
+            runOnUiThread(() -> {
+                needsAppLookupInFlight = false;
+                if (conversationId > 0
+                        && pendingOpenConversationId <= 0) {
+                    pendingOpenConversationId = conversationId;
+                }
+                injectPendingConversationOpen();
+            });
+        });
+    }
+
+    private void surfaceNeedsAppReply(int conversationId) {
+        if (conversationId <= 0 || !activityVisible
+                || isFinishing() || isDestroyed()) {
+            return;
+        }
+        ioExecutor.execute(() -> {
+            NotificationReplyOutbox.Record record =
+                    NotificationReplyOutbox.firstNeedsApp(
+                            getApplicationContext(), conversationId);
+            if (record == null
+                    || record.requestId.equals(
+                    needsAppPromptedRequestId)) {
+                return;
+            }
+            runOnUiThread(() -> {
+                if (!activityVisible || isFinishing() || isDestroyed()
+                        || record.requestId.equals(
+                        needsAppPromptedRequestId)) {
+                    return;
+                }
+                needsAppPromptedRequestId = record.requestId;
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Gönderilmemiş yanıt")
+                        .setMessage("Bildirimde yazdığınız yanıt güvenlik "
+                                + "nedeniyle gönderilmedi. Mesajı gözden "
+                                + "geçirmek için sohbet alanına taşıyalım "
+                                + "mı?")
+                        .setPositiveButton("Mesaj alanına taşı",
+                                (dialog, which) ->
+                                        restoreNeedsAppReplyDraft(record))
+                        .setNegativeButton("Şimdilik kalsın", null)
+                        .show();
+            });
+        });
+    }
+
+    /**
+     * Açık kullanıcı onayından sonra metni normal sohbet taslağına koyar;
+     * gönder düğmesine basılmaz. Böylece tehlike metni notification endpoint
+     * güvenlik kapısını dolanmaz, normal sohbetin güvenlik akışından geçer.
+     */
+    private void restoreNeedsAppReplyDraft(
+            NotificationReplyOutbox.Record record) {
+        if (record == null || webView == null
+                || record.conversationId <= 0) {
+            return;
+        }
+        String quoted = JSONObject.quote(record.message);
+        int conversationId = record.conversationId;
+        String script = "(()=>{"
+                + "if(typeof convId==='undefined'||Number(convId)!=="
+                + conversationId + ")return 'unavailable';"
+                + "const box=document.getElementById('msg');"
+                + "if(!box)return 'unavailable';"
+                + "if(String(box.value||'').trim())return 'occupied';"
+                + "box.value=" + quoted + ";"
+                + "box.dispatchEvent(new Event('input',{bubbles:true}));"
+                + "if(typeof saveConversationDraft==='function')"
+                + "saveConversationDraft(" + conversationId + ");"
+                + "box.focus();return 'restored';})()";
+        webView.evaluateJavascript(script, value -> {
+            if (!"\"restored\"".equals(value)) {
+                toast("Mesaj alanındaki mevcut taslak korunuyor. "
+                        + "Boşalttıktan sonra yeniden deneyin.");
+                return;
+            }
+            ioExecutor.execute(() -> {
+                boolean consumed =
+                        NotificationReplyOutbox.consumeNeedsApp(record);
+                runOnUiThread(() -> {
+                    if (!consumed) {
+                        toast("Şifreli yanıt henüz kaldırılamadı; "
+                                + "taslağınız sohbet alanında korunuyor.");
+                        return;
+                    }
+                    needsAppPromptedRequestId = "";
+                    ChatNotificationController.dismiss(
+                            MainActivity.this, conversationId);
+                    toast("Yanıt sohbet alanına alındı. Gözden geçirip "
+                            + "Gönder’e dokunabilirsiniz.");
+                });
+            });
+        });
     }
 
     private void createLayout() {
         root = new FrameLayout(this);
-        root.setBackgroundColor(Color.rgb(23, 18, 15));
+        root.setBackgroundColor(nativeBackground);
 
         webView = createWebView();
         root.addView(webView, new FrameLayout.LayoutParams(
@@ -162,30 +363,54 @@ public final class MainActivity extends Activity {
         statusPanel.setOrientation(LinearLayout.VERTICAL);
         statusPanel.setGravity(Gravity.CENTER);
         statusPanel.setPadding(dp(32), dp(32), dp(32), dp(32));
-        statusPanel.setBackgroundColor(Color.rgb(23, 18, 15));
+        statusPanel.setBackgroundColor(nativeBackground);
 
-        ProgressBar progress = new ProgressBar(this);
-        if (progress.getIndeterminateDrawable() != null) {
-            progress.getIndeterminateDrawable().setTint(
-                    Color.rgb(215, 178, 124));
+        statusMark = new ImageView(this);
+        statusMark.setImageResource(R.drawable.ic_divan_monochrome);
+        statusMark.setImageTintList(ColorStateList.valueOf(nativeAccent));
+        statusMark.setImportantForAccessibility(
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        statusPanel.addView(statusMark, new LinearLayout.LayoutParams(
+                dp(88), dp(88)));
+
+        loadingProgress = new ProgressBar(this);
+        loadingProgress.setImportantForAccessibility(
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        if (loadingProgress.getIndeterminateDrawable() != null) {
+            loadingProgress.getIndeterminateDrawable().setTint(
+                    nativeAccent);
         }
-        statusPanel.addView(progress, new LinearLayout.LayoutParams(
-                dp(48), dp(48)));
+        LinearLayout.LayoutParams progressParams =
+                new LinearLayout.LayoutParams(dp(40), dp(40));
+        progressParams.topMargin = dp(16);
+        statusPanel.addView(loadingProgress, progressParams);
 
         statusText = new TextView(this);
         statusText.setText(R.string.loading_message);
-        statusText.setTextColor(Color.rgb(234, 223, 200));
-        statusText.setTextSize(18);
+        statusText.setTextColor(nativeForeground);
+        statusText.setTextSize(17);
         statusText.setGravity(Gravity.CENTER);
+        statusText.setLineSpacing(0, 1.1f);
+        statusText.setMaxWidth(dp(440));
+        statusText.setAccessibilityLiveRegion(
+                View.ACCESSIBILITY_LIVE_REGION_POLITE);
         LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        textParams.topMargin = dp(20);
+        textParams.topMargin = dp(16);
         statusPanel.addView(statusText, textParams);
 
         retryButton = new Button(this);
         retryButton.setText(R.string.retry);
-        retryButton.setTextColor(Color.rgb(234, 223, 200));
+        retryButton.setAllCaps(false);
+        retryButton.setTextSize(15);
+        retryButton.setMinWidth(0);
+        retryButton.setMinimumWidth(0);
+        retryButton.setMinHeight(dp(48));
+        retryButton.setMinimumHeight(dp(48));
+        retryButton.setElevation(0);
+        retryButton.setStateListAnimator(null);
+        styleRetryButton(nativeAccent);
         retryButton.setVisibility(View.GONE);
         retryButton.setOnClickListener(view -> startDivan());
         LinearLayout.LayoutParams retryParams = new LinearLayout.LayoutParams(
@@ -204,6 +429,21 @@ public final class MainActivity extends Activity {
                     | WindowInsetsCompat.Type.displayCutout();
             Insets safe = insets.getInsets(safeTypes);
             view.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+            boolean nextImeVisible = insets.isVisible(
+                    WindowInsetsCompat.Type.ime());
+            boolean imeChanged = !mobileImeStateKnown
+                    || mobileImeVisible != nextImeVisible;
+            mobileImeVisible = nextImeVisible;
+            mobileImeStateKnown = true;
+            if (imeChanged) {
+                if (nextImeVisible) {
+                    dispatchMobileViewportState();
+                } else {
+                    // IME-hidden insets can arrive before MATCH_PARENT has
+                    // regained its final height. Measure after layout.
+                    view.post(this::refreshMobileViewportState);
+                }
+            }
 
             // The native frame has already applied these safe areas. Zero
             // only those types before forwarding the update to WebView, so
@@ -219,9 +459,227 @@ public final class MainActivity extends Activity {
 
     private WebView createWebView() {
         WebView view = new WebView(this);
-        view.setBackgroundColor(Color.rgb(23, 18, 15));
+        mobileViewportHeightCss = 0;
+        mobileImeStateKnown = false;
+        mobileViewportRefreshGeneration++;
+        view.addOnLayoutChangeListener((changedView, left, top, right, bottom,
+                                        oldLeft, oldTop, oldRight, oldBottom) -> {
+            int nextHeightCss = measureMobileViewportHeightCss(view);
+            if (mobileViewportHeightCss != nextHeightCss) {
+                mobileViewportHeightCss = nextHeightCss;
+                dispatchMobileViewportState();
+            }
+        });
+        view.setBackgroundColor(nativeBackground);
         view.setVisibility(View.INVISIBLE);
         return view;
+    }
+
+    private int measureMobileViewportHeightCss(WebView current) {
+        int heightPx = current == null ? 0 : Math.max(0, current.getHeight());
+        float density = getResources().getDisplayMetrics().density;
+        return density > 0f
+                ? Math.max(0, Math.round(heightPx / density)) : 0;
+    }
+
+    /**
+     * Foreground, lock-screen and IME transitions can leave WebView's JS
+     * viewport stale even though the native child is already MATCH_PARENT.
+     * Re-read both sources after the next layout and force a fresh JS signal.
+     */
+    private void refreshMobileViewportState() {
+        WebView current = webView;
+        FrameLayout currentRoot = root;
+        if (current == null || currentRoot == null) {
+            return;
+        }
+        int generation = ++mobileViewportRefreshGeneration;
+        ViewTreeObserver observer = current.getViewTreeObserver();
+        if (!observer.isAlive()) {
+            current.post(this::refreshMobileViewportState);
+            return;
+        }
+        observer.addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                if (observer.isAlive()) {
+                    observer.removeOnPreDrawListener(this);
+                } else {
+                    current.getViewTreeObserver().removeOnPreDrawListener(this);
+                }
+                if (generation != mobileViewportRefreshGeneration
+                        || current != webView || currentRoot != root) {
+                    return true;
+                }
+                WindowInsetsCompat insets =
+                        ViewCompat.getRootWindowInsets(currentRoot);
+                if (insets != null) {
+                    mobileImeVisible = insets.isVisible(
+                            WindowInsetsCompat.Type.ime());
+                    mobileImeStateKnown = true;
+                }
+                mobileViewportHeightCss =
+                        measureMobileViewportHeightCss(current);
+                // Foregrounding must reassert the current values even when
+                // neither equality-gated listener observed a change.
+                dispatchMobileViewportState();
+                return true;
+            }
+        });
+        ViewCompat.requestApplyInsets(currentRoot);
+        getWindow().getDecorView().requestLayout();
+        currentRoot.requestLayout();
+        current.requestLayout();
+        current.invalidate();
+    }
+
+    private void dispatchMobileViewportState() {
+        WebView current = webView;
+        if (current == null || !mobileImeStateKnown) {
+            return;
+        }
+        current.post(() -> {
+            if (current != webView || !mobileImeStateKnown) {
+                return;
+            }
+            boolean imeVisible = mobileImeVisible;
+            current.evaluateJavascript(
+                    "window.divanAndroidViewportChanged"
+                            + "?window.divanAndroidViewportChanged("
+                            + (imeVisible ? "true" : "false")
+                            + "):false",
+                    null);
+        });
+    }
+
+    /** Eski iki durumlu köprünün geriye uyumlu uygulaması. */
+    private void applySystemChrome(boolean dark) {
+        applyAndPersistSystemChromeTheme(dark ? "dark" : "paper");
+    }
+
+    private String normalizeSystemChromeTheme(String requestedTheme) {
+        String theme = requestedTheme == null
+                ? "paper"
+                : requestedTheme.trim().toLowerCase(Locale.ROOT);
+        if ("white".equals(theme) || "dark".equals(theme)
+                || "paper".equals(theme)) {
+            return theme;
+        }
+        return "paper";
+    }
+
+    private String savedSystemChromeTheme() {
+        return normalizeSystemChromeTheme(getSharedPreferences(
+                NATIVE_VISUAL_PREFS, Context.MODE_PRIVATE).getString(
+                        NATIVE_THEME_KEY, "paper"));
+    }
+
+    private void applyAndPersistSystemChromeTheme(String requestedTheme) {
+        String theme = normalizeSystemChromeTheme(requestedTheme);
+        // Cosmetic only: SharedPreferences keeps the native launch/error
+        // surface aligned before the local WebView has finished loading.
+        getSharedPreferences(NATIVE_VISUAL_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(NATIVE_THEME_KEY, theme)
+                .apply();
+        applySystemChromeTheme(theme);
+    }
+
+    /**
+     * Mobil web temasını Android durum/gezinme çubukları ve yükleme
+     * yüzeyiyle birebir eşler. Tanınmayan değerler sıcak kâğıda düşer;
+     * Javascript köprüsünden keyfi renk kabul edilmez.
+     */
+    private void applySystemChromeTheme(String requestedTheme) {
+        String theme = normalizeSystemChromeTheme(requestedTheme);
+        int background;
+        int foreground;
+        int accent;
+        boolean dark;
+        switch (theme) {
+            case "white":
+                background = Color.rgb(255, 255, 255);
+                foreground = Color.rgb(23, 25, 27);
+                accent = Color.rgb(109, 37, 53);
+                dark = false;
+                break;
+            case "dark":
+                background = Color.rgb(25, 29, 32);
+                foreground = Color.rgb(242, 240, 235);
+                accent = Color.rgb(227, 163, 178);
+                dark = true;
+                break;
+            case "paper":
+            default:
+                background = getColor(R.color.divan_background);
+                foreground = getColor(R.color.divan_ink);
+                accent = getColor(R.color.divan_wine);
+                dark = false;
+                break;
+        }
+        nativeBackground = background;
+        nativeForeground = foreground;
+        nativeAccent = accent;
+        // API 24–25 cannot draw dark navigation-bar icons. A wine bar keeps
+        // the legacy white controls legible; API 26+ can match the surface.
+        boolean legacyLightNavigation = !dark
+                && Build.VERSION.SDK_INT < Build.VERSION_CODES.O;
+        int navigationBackground = legacyLightNavigation
+                ? accent : background;
+        getWindow().setStatusBarColor(background);
+        getWindow().setNavigationBarColor(navigationBackground);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            getWindow().setNavigationBarDividerColor(navigationBackground);
+        }
+        WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(
+                        getWindow(), getWindow().getDecorView());
+        controller.setAppearanceLightStatusBars(!dark);
+        controller.setAppearanceLightNavigationBars(
+                !dark && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O);
+        if (root != null) {
+            root.setBackgroundColor(background);
+        }
+        if (webView != null) {
+            webView.setBackgroundColor(background);
+        }
+        if (statusPanel != null) {
+            statusPanel.setBackgroundColor(background);
+        }
+        if (statusText != null) {
+            statusText.setTextColor(foreground);
+        }
+        if (statusMark != null) {
+            statusMark.setImageTintList(ColorStateList.valueOf(accent));
+        }
+        if (retryButton != null) {
+            styleRetryButton(accent);
+        }
+        if (loadingProgress != null
+                && loadingProgress.getIndeterminateDrawable() != null) {
+            loadingProgress.getIndeterminateDrawable().setTint(accent);
+        }
+    }
+
+    private void styleRetryButton(int accent) {
+        if (retryButton == null) {
+            return;
+        }
+        retryButton.setTextColor(accent);
+        retryButton.setBackgroundTintList(null);
+        retryButton.setBackground(retryButtonBackground(accent));
+        retryButton.setPadding(dp(24), 0, dp(24), 0);
+    }
+
+    private Drawable retryButtonBackground(int accent) {
+        GradientDrawable outline = new GradientDrawable();
+        outline.setColor(Color.TRANSPARENT);
+        outline.setCornerRadius(dp(24));
+        outline.setStroke(Math.max(1, dp(1)), accent);
+        int ripple = Color.argb(
+                30, Color.red(accent), Color.green(accent), Color.blue(accent));
+        return new RippleDrawable(
+                ColorStateList.valueOf(ripple), outline, null);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -309,15 +767,38 @@ public final class MainActivity extends Activity {
     private void openDivan(int port, String token) {
         serverPort = port;
         sessionToken = token;
-        String launchUrl = "http://127.0.0.1:" + port
-                + "/?_divan_session=" + Uri.encode(token);
-        webView.loadUrl(launchUrl);
+        String baseUrl = "http://127.0.0.1:" + port + "/";
+        CookieManager cookies = CookieManager.getInstance();
+        int generation = ++sessionCookieGeneration;
+        // Aynı ad/host/yoldaki bayat değer setCookie ile atomik biçimde
+        // değiştirilir. removeSessionCookies eşzamansızdır; onu çağırıp hemen
+        // yeni çerez kurmak, geciken silmenin taze çerezi de kaldırmasına ve
+        // aralıklı 403 "uygulama oturumu doğrulanamadı" hatasına yol açar.
+        // HttpOnly ayrıca belirteci yerel sayfanın JavaScript alanından uzak
+        // tutar; SameSite sunucunun kendi oturum sözleşmesiyle aynıdır.
+        String cookie = "divan_embedded_session=" + Uri.encode(token)
+                + "; Path=/; HttpOnly; SameSite=Strict";
+        cookies.setCookie(baseUrl, cookie, installed -> {
+            if (generation != sessionCookieGeneration
+                    || isFinishing() || isDestroyed()) {
+                return;
+            }
+            if (!Boolean.TRUE.equals(installed)) {
+                showStatus(
+                        "Divan’ın güvenli uygulama oturumu hazırlanamadı.",
+                        true);
+                return;
+            }
+            cookies.flush();
+            webView.loadUrl(baseUrl);
+        });
     }
 
     private void showStatus(String message, boolean canRetry) {
         webView.setVisibility(View.INVISIBLE);
         statusPanel.setVisibility(View.VISIBLE);
         statusText.setText(message);
+        loadingProgress.setVisibility(canRetry ? View.GONE : View.VISIBLE);
         retryButton.setVisibility(canRetry ? View.VISIBLE : View.GONE);
     }
 
@@ -503,13 +984,23 @@ public final class MainActivity extends Activity {
         }
         boolean granted = grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
-        if (!granted) {
-            getSharedPreferences(APP_PREFERENCES, Context.MODE_PRIVATE)
-                    .edit()
-                    .putBoolean(REPLY_NOTIFICATIONS_KEY, false)
-                    .commit();
-            toast("Bildirim izni verilmedi; nötr bildirim seçeneği kapatıldı.");
+        boolean completionRequest = notificationPermissionForCompletion;
+        boolean reminderRequest = notificationPermissionForReminder;
+        notificationPermissionForCompletion = false;
+        notificationPermissionForReminder = false;
+        if (!granted && completionRequest) {
+            NotificationPreferences.setCompletionEnabled(this, false);
+            ChatNotificationController.purgeSensitiveNotifications(this);
         }
+        if (granted) {
+            CompletionNotificationController.ensureChannels(this);
+            ReminderReceiver.ensureChannel(this);
+            ReminderReceiver.rescheduleAll(getApplicationContext());
+            ResponseKeeperJobService.schedule(getApplicationContext());
+        } else if (completionRequest || reminderRequest) {
+            toast("Bildirim izni verilmedi. Android ayarlarından daha sonra açabilirsiniz.");
+        }
+        notifyWebNotificationPermissionChanged(granted);
     }
 
     @Override
@@ -537,17 +1028,46 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         activityVisible = true;
+        ChatNotificationController.setAppVisible(true);
         backgroundPollGeneration++;
-        NotificationManager manager = (NotificationManager)
-                getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager != null) {
-            manager.cancel(REPLY_NOTIFICATION_ID);
+        ChatNotificationController.purgeSensitiveNotifications(this);
+        boolean notificationsAllowed = notificationsPermitted();
+        notifyWebNotificationPermissionChanged(notificationsAllowed);
+        if (notificationsAllowed) {
+            CompletionNotificationController.ensureChannels(this);
+            ReminderReceiver.ensureChannel(this);
+            // Kullanıcı Android ayarlarından izin verip döndüyse, daha önce
+            // teslim edilemeyen nötr görev alarmlarını yeniden kur.
+            ReminderReceiver.rescheduleAll(getApplicationContext());
+        }
+        if (pendingOpenConversationId > 0 && webView != null
+                && webView.getVisibility() == View.VISIBLE) {
+            webView.post(this::injectPendingConversationOpen);
+        } else {
+            queueNeedsAppConversationOpen();
+        }
+        refreshMobileViewportState();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            refreshMobileViewportState();
         }
     }
 
     @Override
     protected void onStop() {
         activityVisible = false;
+        mobileViewportRefreshGeneration++;
+        mobileViewportHeightCss = 0;
+        mobileImeVisible = false;
+        mobileImeStateKnown = false;
+        ChatNotificationController.setAppVisible(false);
+        // "Şimdilik kalsın" seçildiyse yeni bir gerçek uygulama dönüşünde
+        // tekrar sorulabilir; aynı görünür Activity içinde döngü kurulmaz.
+        needsAppPromptedRequestId = "";
         if (pendingWebWork > 0) {
             ResponseKeeperJobService.schedule(getApplicationContext());
         }
@@ -561,33 +1081,52 @@ public final class MainActivity extends Activity {
     }
 
     private boolean completionNotificationsEnabled() {
-        return getSharedPreferences(APP_PREFERENCES, Context.MODE_PRIVATE)
-                .getBoolean(REPLY_NOTIFICATIONS_KEY, false);
+        return NotificationPreferences.completionEnabled(this);
     }
 
     private boolean canPostCompletionNotification() {
         return completionNotificationsEnabled()
-                && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
-                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                == PackageManager.PERMISSION_GRANTED);
+                && NotificationPreferences.systemPermissionGranted(this);
     }
 
-    private void createReplyNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+    private boolean notificationsPermitted() {
+        return NotificationPreferences.systemPermissionGranted(this);
+    }
+
+    private void requestNotificationPermission(
+            boolean forCompletion, boolean forReminder) {
+        runOnUiThread(() -> {
+            notificationPermissionForCompletion |= forCompletion;
+            notificationPermissionForReminder |= forReminder;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                    && checkSelfPermission(
+                            Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                        new String[] {Manifest.permission.POST_NOTIFICATIONS},
+                        REQUEST_NOTIFICATION_PERMISSION);
+                return;
+            }
+            // İzin çalışma zamanında verilmiş olsa bile kullanıcı uygulama
+            // bildirimlerini sistem ayarından bütünüyle kapatmış olabilir.
+            boolean granted = NotificationPreferences
+                    .systemPermissionGranted(this);
+            notifyWebNotificationPermissionChanged(granted);
+            if (!granted) {
+                toast("Divan bildirimleri Android ayarlarında kapalı.");
+            }
+        });
+    }
+
+    private void notifyWebNotificationPermissionChanged(boolean granted) {
+        if (webView == null) {
             return;
         }
-        NotificationManager manager = (NotificationManager)
-                getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager == null) {
-            return;
-        }
-        NotificationChannel channel = new NotificationChannel(
-                REPLY_NOTIFICATION_CHANNEL,
-                getString(R.string.notification_channel_name),
-                NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription(
-                getString(R.string.notification_channel_description));
-        manager.createNotificationChannel(channel);
+        webView.post(() -> webView.evaluateJavascript(
+                "window.divanAndroidNotificationPermissionChanged"
+                        + "?window.divanAndroidNotificationPermissionChanged("
+                        + (granted ? "true" : "false") + "):false",
+                null));
     }
 
     private void startBackgroundCompletionWatch(boolean alreadyPending) {
@@ -613,7 +1152,8 @@ public final class MainActivity extends Activity {
                             generation, true, attemptsRemaining - 1),
                     4, TimeUnit.SECONDS);
         } else if (sawPending) {
-            showNeutralCompletionNotification();
+            CompletionNotificationController.deliverPending(
+                    this, serverPort, sessionToken);
         }
     }
 
@@ -673,41 +1213,10 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void showNeutralCompletionNotification() {
-        if (activityVisible || !canPostCompletionNotification()) {
-            return;
-        }
-        Intent open = new Intent(this, MainActivity.class)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        PendingIntent contentIntent = PendingIntent.getActivity(
-                this, 0, open,
-                PendingIntent.FLAG_UPDATE_CURRENT
-                        | PendingIntent.FLAG_IMMUTABLE);
-        Notification.Builder builder = Build.VERSION.SDK_INT
-                >= Build.VERSION_CODES.O
-                ? new Notification.Builder(this, REPLY_NOTIFICATION_CHANNEL)
-                : new Notification.Builder(this);
-        Notification notification = builder
-                .setSmallIcon(R.drawable.ic_divan_launcher)
-                .setContentTitle(getString(R.string.notification_ready_title))
-                .setContentText(getString(R.string.notification_ready_text))
-                .setContentIntent(contentIntent)
-                .setCategory(Notification.CATEGORY_STATUS)
-                .setVisibility(Notification.VISIBILITY_PRIVATE)
-                .setAutoCancel(true)
-                .setOnlyAlertOnce(true)
-                .build();
-        NotificationManager manager = (NotificationManager)
-                getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager != null) {
-            manager.notify(REPLY_NOTIFICATION_ID, notification);
-        }
-    }
-
     @Override
     protected void onDestroy() {
         backgroundPollGeneration++;
+        sessionCookieGeneration++;
         if (pendingWebWork > 0) {
             ResponseKeeperJobService.schedule(getApplicationContext());
         }
@@ -752,9 +1261,7 @@ public final class MainActivity extends Activity {
             dispatchSyncScanError("scan_in_progress");
             return;
         }
-        if (isFinishing()
-                || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1
-                && isDestroyed())) {
+        if (isFinishing() || isDestroyed()) {
             dispatchSyncScanError("scanner_unavailable");
             return;
         }
@@ -992,6 +1499,12 @@ public final class MainActivity extends Activity {
 
     private final class LocalOnlyWebViewClient extends WebViewClient {
         @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            mainFrameLoadFailed = false;
+            super.onPageStarted(view, url, favicon);
+        }
+
+        @Override
         public boolean shouldOverrideUrlLoading(
                 WebView view, WebResourceRequest request) {
             return handleNavigation(request.getUrl());
@@ -1019,11 +1532,13 @@ public final class MainActivity extends Activity {
         @Override
         public void onPageFinished(WebView view, String url) {
             Uri uri = Uri.parse(url);
-            if (isLocal(uri) && "/".equals(uri.getPath())
+            if (!mainFrameLoadFailed && isLocal(uri) && "/".equals(uri.getPath())
                     && uri.getQuery() == null) {
                 CookieManager.getInstance().flush();
                 view.clearHistory();
                 showDivan();
+                refreshMobileViewportState();
+                queueNeedsAppConversationOpen();
             }
         }
 
@@ -1032,11 +1547,30 @@ public final class MainActivity extends Activity {
                                     WebResourceRequest request,
                                     WebResourceError error) {
             if (request.isForMainFrame()) {
+                mainFrameLoadFailed = true;
                 showStatus(
                         "Divan’ın yerel ekranına ulaşılamadı.\n"
                                 + error.getDescription(),
                         true);
             }
+        }
+
+        @Override
+        public void onReceivedHttpError(
+                WebView view,
+                WebResourceRequest request,
+                WebResourceResponse errorResponse) {
+            if (!request.isForMainFrame()) {
+                return;
+            }
+            mainFrameLoadFailed = true;
+            int status = errorResponse == null
+                    ? 0 : errorResponse.getStatusCode();
+            String suffix = status > 0 ? " (" + status + ")" : "";
+            showStatus(
+                    "Divan’ın güvenli yerel ekranı hazırlanamadı"
+                            + suffix + ".",
+                    true);
         }
 
         @Override
@@ -1098,6 +1632,27 @@ public final class MainActivity extends Activity {
     }
 
     private final class NativeExports {
+        /**
+         * WebView'in native yerleşim yüksekliği CSS pikseli cinsindedir.
+         * Samsung WebView IME kapandıktan sonra visualViewport ve 100dvh
+         * değerlerini eski küçük yükseklikte tutabildiği için yalnız ölçüm
+         * otoritesi olarak sunulur; inset veya padding uygulanmaz.
+         */
+        @JavascriptInterface
+        public int mobileViewportHeight() {
+            return Math.max(0, mobileViewportHeightCss);
+        }
+
+        @JavascriptInterface
+        public boolean mobileImeVisible() {
+            return mobileImeVisible;
+        }
+
+        @JavascriptInterface
+        public boolean mobileImeStateKnown() {
+            return mobileImeStateKnown;
+        }
+
         @JavascriptInterface
         public void copyText(String content) {
             String text = String.valueOf(content);
@@ -1182,39 +1737,107 @@ public final class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public boolean notificationPreviewsEnabled() {
+            return NotificationPreferences.previewsEnabled(
+                    MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public boolean notificationInlineReplyEnabled() {
+            return NotificationPreferences.inlineReplyEnabled(
+                    MainActivity.this);
+        }
+
+        /**
+         * UI kolaylığı için fail-closed anlık yeterlilik. Güvenlik kararı
+         * yine notification-context ve POST kabulünde sunucuda tekrarlanır.
+         */
+        @JavascriptInterface
+        public boolean notificationInlineReplyAvailable() {
+            if (serverPort <= 0 || sessionToken.isEmpty()) {
+                return false;
+            }
+            try {
+                String body = DivanLocalApi.get(
+                        serverPort,
+                        sessionToken,
+                        "/api/notification-reply-capability");
+                return body != null
+                        && new JSONObject(body).optBoolean(
+                                "allowed", false);
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean notificationPermissionGranted() {
+            return notificationsPermitted();
+        }
+
+        @JavascriptInterface
         public void setReplyNotificationsEnabled(boolean enabled) {
-            boolean saved = getSharedPreferences(
-                    APP_PREFERENCES, Context.MODE_PRIVATE)
-                    .edit()
-                    .putBoolean(REPLY_NOTIFICATIONS_KEY, enabled)
-                    .commit();
+            boolean wasEnabled = NotificationPreferences.completionEnabled(
+                    MainActivity.this);
+            boolean saved = NotificationPreferences.setCompletionEnabled(
+                    MainActivity.this, enabled);
             runOnUiThread(() -> {
                 if (!saved) {
                     toast("Bildirim tercihi kaydedilemedi.");
                     return;
                 }
-                if (!enabled) {
+                if (wasEnabled && !enabled) {
                     backgroundPollGeneration++;
-                    NotificationManager manager = (NotificationManager)
-                            getSystemService(Context.NOTIFICATION_SERVICE);
-                    if (manager != null) {
-                        manager.cancel(REPLY_NOTIFICATION_ID);
-                    }
+                    ChatNotificationController.purgeSensitiveNotifications(
+                            MainActivity.this);
                     return;
                 }
-                createReplyNotificationChannel();
-                if (Build.VERSION.SDK_INT
-                        >= Build.VERSION_CODES.TIRAMISU
-                        && checkSelfPermission(
-                                Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    requestPermissions(
-                            new String[] {
-                                Manifest.permission.POST_NOTIFICATIONS
-                            },
-                            REQUEST_NOTIFICATION_PERMISSION);
+                if (!enabled) {
+                    return;
+                }
+                CompletionNotificationController.ensureChannels(
+                        MainActivity.this);
+                requestNotificationPermission(true, false);
+            });
+        }
+
+        @JavascriptInterface
+        public void setNotificationPreviewsEnabled(boolean enabled) {
+            boolean wasEnabled = NotificationPreferences.previewsEnabled(
+                    MainActivity.this);
+            boolean saved = NotificationPreferences.setPreviewsEnabled(
+                    MainActivity.this, enabled);
+            if (!saved) {
+                toast("Bildirim önizleme tercihi kaydedilemedi.");
+            } else if (wasEnabled && !enabled) {
+                ChatNotificationController.purgeSensitiveNotifications(
+                        MainActivity.this);
+            }
+        }
+
+        @JavascriptInterface
+        public void setNotificationInlineReplyEnabled(boolean enabled) {
+            boolean wasEnabled = NotificationPreferences.inlineReplyEnabled(
+                    MainActivity.this);
+            boolean saved = NotificationPreferences.setInlineReplyEnabled(
+                    MainActivity.this, enabled);
+            runOnUiThread(() -> {
+                if (!saved) {
+                    toast("Bildirimden yanıt tercihi kaydedilemedi.");
+                    return;
+                }
+                if (wasEnabled && !enabled) {
+                    // Tepside daha önce hazırlanmış mutable eylem kalmasın.
+                    ChatNotificationController.purgeSensitiveNotifications(
+                            MainActivity.this);
                 }
             });
+        }
+
+        @JavascriptInterface
+        public void purgeSensitiveNotifications() {
+            ChatNotificationController.purgeSensitiveNotifications(
+                    MainActivity.this);
         }
 
         @JavascriptInterface
@@ -1228,6 +1851,75 @@ public final class MainActivity extends Activity {
                     && canPostCompletionNotification()) {
                 startBackgroundCompletionWatch(true);
             }
+        }
+
+        @JavascriptInterface
+        public void appUnlocked() {
+            ChatNotificationController.purgeSensitiveNotifications(
+                    MainActivity.this);
+            runOnUiThread(
+                    MainActivity.this::queueNeedsAppConversationOpen);
+        }
+
+        @JavascriptInterface
+        public void setSystemChrome(boolean dark) {
+            runOnUiThread(() -> applySystemChrome(dark));
+        }
+
+        @JavascriptInterface
+        public void setSystemChromeTheme(String theme) {
+            final String requested = theme == null ? "paper" : theme;
+            runOnUiThread(() ->
+                    MainActivity.this.applyAndPersistSystemChromeTheme(
+                            requested));
+        }
+
+        @JavascriptInterface
+        public void openNotificationSettings() {
+            runOnUiThread(() -> {
+                Intent intent;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    intent = new Intent(
+                            Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(
+                                    Settings.EXTRA_APP_PACKAGE,
+                                    getPackageName());
+                } else {
+                    intent = new Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:" + getPackageName()));
+                }
+                try {
+                    startActivity(intent);
+                } catch (ActivityNotFoundException failure) {
+                    toast("Android bildirim ayarları açılamadı.");
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean scheduleReminderNotification(
+                String id, String title, String body, long afterSeconds) {
+            return scheduleReminderNotification(
+                    id, title, body, afterSeconds, 0L);
+        }
+
+        @JavascriptInterface
+        public boolean scheduleReminderNotification(
+                String id, String title, String body, long afterSeconds,
+                long conversationId) {
+            if (!notificationsPermitted()) {
+                requestNotificationPermission(false, true);
+                return false;
+            }
+            return ReminderReceiver.schedule(
+                    MainActivity.this, id, title, body, afterSeconds,
+                    conversationId);
+        }
+
+        @JavascriptInterface
+        public void cancelReminderNotification(String id) {
+            ReminderReceiver.cancel(MainActivity.this, id);
         }
 
         @JavascriptInterface
