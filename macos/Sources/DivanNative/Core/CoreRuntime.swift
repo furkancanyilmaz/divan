@@ -166,7 +166,7 @@ public actor CoreRuntime {
         "server.py":
             "e205b2e1efc92575cb99262ea85812e4d986369dc4635193bd9e508d31a4fe7b",
         "index.html":
-            "9c58ff43ae90febd61c4fe2066fd7ee7649fb232af44bd2a716dc287581672d0",
+            "5f03a514745ea90dedb53507393a05711e9432df67f48182868d18365eefb6ab",
         "sync_engine.py":
             "39005a82d5d358557e222e7de7a6c3a2284453ecf2a8ad69584a142dafacc512",
         "sync_service.py":

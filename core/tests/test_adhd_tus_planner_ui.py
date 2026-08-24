@@ -230,6 +230,12 @@ for(const changed of [
         )
         self.assertEqual(mutation.count("await openConv("), 1)
         self.assertIn("restoreChatViewportAnchor(viewportAnchor)", mutation)
+        self.assertNotIn("scrollConversationToLatest(", mutation)
+        self.assertNotIn("scrollIntoView(", mutation)
+        self.assertLess(
+            mutation.index("restoreChatViewportAnchor(viewportAnchor)"),
+            mutation.index("focusAdhdTusChatPrompt(prompt.message_id)"),
+        )
         finally_block = mutation[mutation.index("}finally{"):]
         self.assertNotIn("renderAdhdTusChatAttachment()", finally_block)
 

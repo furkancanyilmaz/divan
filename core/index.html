@@ -10381,6 +10381,8 @@ let conversationSearchMatches = [];
 let conversationSearchIndex = -1;
 let conversationSearchTimer = null;
 let unseenResponseContent = false;
+let chatFollowLatestIntent = true;
+let chatFollowResumeBlocked = false;
 let storyMessages = [];
 let storyPages = [];
 let storyPageIndex = 0;
@@ -10465,8 +10467,12 @@ const chat = $('chat'), msgBox = $('msg');
 const DRAFT_STORAGE_PREFIX = 'divanConversationDraft:v1:';
 let sendTypingTimer = null;
 let composerAnchorActive = false;
+let composerScrollPolicy = 'idle';
+let composerReadingAnchor = null;
+let composerFollowSuspended = false;
 let composerAnchorSequence = 0;
 let composerAnchorSettleTimer = null;
+let chatViewportInteractionSequence = 0;
 let mobileViewportSettleSequence = 0;
 let androidImeCssFallback = false;
 let responsiveSideDrawerReady = false;
@@ -10982,7 +10988,6 @@ function resetAndroidMobileViewportHeight({force=false}={}){
   if(nativeHeight>0)root.style.setProperty('--mobile-vvh',nativeHeight+'px');
   else root.style.removeProperty('--mobile-vvh');
   document.body.classList.remove('workImeCompact');
-  clearMobileComposerAnchor();
   pinMobileRootScroll();
   return true;
 }
@@ -11105,6 +11110,21 @@ function chatDistanceFromBottom(){
 function chatIsNearBottom(limit=96){
   return chatDistanceFromBottom()<=limit;
 }
+function setChatScrollTop(top){
+  if(!chat)return;
+  const previous=chat.style.scrollBehavior;
+  chat.style.scrollBehavior='auto';
+  chat.scrollTop=Math.max(0,Math.min(Number(top)||0,
+    Math.max(0,chat.scrollHeight-chat.clientHeight)));
+  chat.style.scrollBehavior=previous;
+}
+function followChatToLatest({clearUnseen=true}={}){
+  if(!chat)return;
+  setChatScrollTop(chat.scrollHeight-chat.clientHeight);
+  if(clearUnseen)unseenResponseContent=false;
+  syncScrollToLatestButton();
+  pinMobileRootScroll();
+}
 function syncScrollToLatestButton(){
   const button=$('scrollToLatestBtn');
   if(!button)return;
@@ -11124,15 +11144,13 @@ function markNewResponseBelow(){
   syncScrollToLatestButton();
 }
 function scrollConversationToLatest(){
+  chatFollowLatestIntent=true;
+  chatFollowResumeBlocked=false;
   const settle=()=>{
     if(!chat)return;
-    const previous=chat.style.scrollBehavior;
-    chat.style.scrollBehavior='auto';
-    chat.scrollTop=Math.max(0,chat.scrollHeight-chat.clientHeight);
-    chat.style.scrollBehavior=previous;
-    unseenResponseContent=false;
-    syncScrollToLatestButton();
-    pinMobileRootScroll();
+    followChatToLatest();
+    if(mobileChatViewport()&&document.activeElement===msgBox)
+      useMobileComposerFollowLatest();
   };
   settle();
   requestAnimationFrame(()=>{
@@ -11165,6 +11183,8 @@ function captureChatViewportAnchor(preferred=null){
 }
 function restoreChatViewportAnchor(snapshot){
   if(!snapshot||!chat)return false;
+  chat.style.scrollBehavior='auto';
+  chat.style.overflowAnchor='none';
   const sameConversation=snapshot.conversationId===Number(convId);
   if(sameConversation&&snapshot.anchor&&snapshot.anchor.isConnected&&
       snapshot.offset!==null){
@@ -11176,6 +11196,53 @@ function restoreChatViewportAnchor(snapshot){
   chat.style.scrollBehavior=snapshot.scrollBehavior;
   chat.style.overflowAnchor=snapshot.overflowAnchor;
   pinMobileRootScroll();syncScrollToLatestButton();return true;
+}
+function captureConversationReloadViewport({markUnseen=false}={}){
+  if(!chat||chatIsNearBottom())return null;
+  const chatRect=chat.getBoundingClientRect();
+  const rows=[...chat.querySelectorAll(':scope > .row')];
+  const anchor=rows.find(row=>{
+    const rect=row.getBoundingClientRect();
+    return rect.bottom>chatRect.top+1&&rect.top<chatRect.bottom-1&&
+      Number(row.querySelector('.bubble')?.dataset.messageId)>0;
+  })||rows.find(row=>{
+    const rect=row.getBoundingClientRect();
+    return rect.bottom>chatRect.top+1&&rect.top<chatRect.bottom-1;
+  })||null;
+  const bubble=anchor&&anchor.querySelector('.bubble');
+  return {
+    conversationId:Number(convId),
+    messageId:Number(bubble&&bubble.dataset.messageId)||null,
+    offset:anchor?anchor.getBoundingClientRect().top-chatRect.top:null,
+    scrollTop:chat.scrollTop,
+    distanceFromBottom:chatDistanceFromBottom(),
+    interactionSequence:chatViewportInteractionSequence,
+    markUnseen:!!markUnseen
+  };
+}
+function restoreConversationReloadViewport(snapshot){
+  if(!snapshot||snapshot.conversationId!==Number(convId)||!chat)return false;
+  if(snapshot.markUnseen)unseenResponseContent=true;
+  chatFollowLatestIntent=false;
+  syncScrollToLatestButton();
+  const settle=()=>{
+    if(snapshot.interactionSequence!==chatViewportInteractionSequence)return;
+    const bubble=snapshot.messageId&&
+      messageBubbleById.get(Number(snapshot.messageId));
+    const row=bubble&&bubble.closest('.row');
+    if(row&&snapshot.offset!==null){
+      const current=row.getBoundingClientRect().top-
+        chat.getBoundingClientRect().top;
+      setChatScrollTop(chat.scrollTop+current-snapshot.offset);
+    }else{
+      setChatScrollTop(chat.scrollHeight-chat.clientHeight-
+        snapshot.distanceFromBottom);
+    }
+    syncScrollToLatestButton();pinMobileRootScroll();
+  };
+  settle();
+  requestAnimationFrame(()=>{settle();requestAnimationFrame(settle);});
+  return true;
 }
 function revealChatElementNearest(element,{margin=10}={}){
   if(!element||!element.isConnected||!chat.contains(element))return false;
@@ -12238,54 +12305,83 @@ function setMobileComposerAnchor(active){
   composerAnchorActive=next;
   chat.classList.toggle('composerAnchored',next);
 }
+function releaseMobileComposerReadingAnchor(){
+  const snapshot=composerReadingAnchor;
+  composerReadingAnchor=null;
+  if(!snapshot||!chat)return;
+  chat.style.scrollBehavior=snapshot.scrollBehavior;
+  chat.style.overflowAnchor=snapshot.overflowAnchor;
+}
+function useMobileComposerFollowLatest(){
+  if(!mobileChatViewport()||!chat.querySelector('.row'))return false;
+  releaseMobileComposerReadingAnchor();
+  composerFollowSuspended=false;
+  chatFollowLatestIntent=true;
+  chatFollowResumeBlocked=false;
+  composerScrollPolicy='follow';
+  setMobileComposerAnchor(true);
+  return true;
+}
+function captureMobileComposerScrollPolicy({refresh=false}={}){
+  if(!mobileChatViewport()||!chat.querySelector('.row')){
+    clearMobileComposerAnchor();return 'idle';
+  }
+  if(!refresh&&composerScrollPolicy!=='idle')return composerScrollPolicy;
+  composerFollowSuspended=false;
+  releaseMobileComposerReadingAnchor();
+  if(chatIsNearBottom()){
+    useMobileComposerFollowLatest();
+  }else{
+    chatFollowLatestIntent=false;
+    composerScrollPolicy='preserve';
+    setMobileComposerAnchor(false);
+    composerReadingAnchor=captureChatViewportAnchor();
+  }
+  return composerScrollPolicy;
+}
 function alignLatestMessageAboveComposer(){
-  if(!composerAnchorActive||!mobileChatViewport()||
+  if(composerScrollPolicy!=='follow'||!composerAnchorActive||
+      !mobileChatViewport()||
       document.activeElement!==msgBox)return;
-  const previous=chat.style.scrollBehavior;
-  chat.style.scrollBehavior='auto';
-  chat.scrollTop=Math.max(0,chat.scrollHeight-chat.clientHeight);
-  chat.style.scrollBehavior=previous;
+  followChatToLatest();
+}
+function restoreMobileComposerReadingPosition(){
+  if(composerScrollPolicy!=='preserve'||!composerReadingAnchor||
+      !mobileChatViewport()||document.activeElement!==msgBox)return;
+  restoreChatViewportAnchor(composerReadingAnchor);
 }
 function scheduleMobileComposerAnchor(){
-  if(!composerAnchorActive||!mobileChatViewport()||
-      document.activeElement!==msgBox)return;
+  if(!mobileChatViewport()||document.activeElement!==msgBox)return;
+  if(composerScrollPolicy==='idle')return;
   syncMobileViewportHeight();
   pinMobileRootScroll();
   const sequence=++composerAnchorSequence;
   clearTimeout(composerAnchorSettleTimer);
-  requestAnimationFrame(()=>{
+  const settle=()=>{
     if(sequence!==composerAnchorSequence)return;
     pinMobileRootScroll();
-    alignLatestMessageAboveComposer();
-    requestAnimationFrame(()=>{
-      if(sequence===composerAnchorSequence){
-        pinMobileRootScroll();
-        alignLatestMessageAboveComposer();
-      }
-    });
+    if(composerScrollPolicy==='follow')alignLatestMessageAboveComposer();
+    else restoreMobileComposerReadingPosition();
+  };
+  requestAnimationFrame(()=>{
+    settle();requestAnimationFrame(settle);
   });
-  composerAnchorSettleTimer=setTimeout(()=>{
-    if(sequence===composerAnchorSequence){
-      pinMobileRootScroll();
-      alignLatestMessageAboveComposer();
-    }
-  },420);
+  composerAnchorSettleTimer=setTimeout(settle,420);
 }
 function prepareMobileComposerAnchor(){
   if(!mobileChatViewport())return;
   syncMobileViewportHeight();
-  setMobileComposerAnchor(true);
-  scheduleMobileComposerAnchor();
+  captureMobileComposerScrollPolicy({refresh:true});
 }
 function reopenMobileComposer(){
   if(!mobileChatViewport())return;
   syncMobileViewportHeight();
   pinMobileRootScroll();
+  captureMobileComposerScrollPolicy();
   focusWithoutScrolling(msgBox);
-  setMobileComposerAnchor(true);
   scheduleMobileComposerAnchor();
   [100,260,520].forEach(delay=>setTimeout(()=>{
-    if(composerAnchorActive&&document.activeElement===msgBox)
+    if(composerScrollPolicy!=='idle'&&document.activeElement===msgBox)
       scheduleMobileComposerAnchor();
   },delay));
   if(DivanNative.supports('showKeyboard'))
@@ -12293,6 +12389,9 @@ function reopenMobileComposer(){
 }
 function clearMobileComposerAnchor(){
   setMobileComposerAnchor(false);
+  composerScrollPolicy='idle';
+  composerFollowSuspended=false;
+  releaseMobileComposerReadingAnchor();
   composerAnchorSequence++;
   clearTimeout(composerAnchorSettleTimer);
 }
@@ -12340,8 +12439,10 @@ function focusComposerForViewport(){
 function anchorMobileResponseTurn(bubble){
   if(!mobileChatViewport()||!bubble)return;
   const row=bubble.closest('.row')||bubble;
+  const interactionSequence=chatViewportInteractionSequence;
   const settle=()=>{
-    if(!document.contains(row))return;
+    if(interactionSequence!==chatViewportInteractionSequence||
+        !document.contains(row))return;
     const chatRect=chat.getBoundingClientRect();
     const rowRect=row.getBoundingClientRect();
     const top=chat.scrollTop+rowRect.top-chatRect.top-8;
@@ -12350,14 +12451,7 @@ function anchorMobileResponseTurn(bubble){
       behavior:document.body.classList.contains('reduceMotion')?'auto':'smooth'
     });
   };
-  let userInteracted=false;
-  const cancelSettle=()=>{userInteracted=true;};
-  chat.addEventListener('touchstart',cancelSettle,{once:true,passive:true});
   requestAnimationFrame(settle);
-  setTimeout(()=>{
-    if(!userInteracted)settle();
-    chat.removeEventListener('touchstart',cancelSettle);
-  },320);
 }
 function T(id){
   const explicit=arguments.length>0;
@@ -17944,6 +18038,7 @@ function initializeMessageHistory(data){
   renderMessageHistoryControl();
 }
 function clearChatMessages(){
+  clearMobileComposerAnchor();
   setOpenMessageActionsBubble(null);
   cancelAssistantReplySwipe();
   const historyControl=$('messageHistoryControl');
@@ -17954,6 +18049,8 @@ function clearChatMessages(){
   conversationSearchMatches=[];
   conversationSearchIndex=-1;
   unseenResponseContent=false;
+  chatFollowLatestIntent=true;
+  chatFollowResumeBlocked=false;
   resetMessageHistoryState();
   syncScrollToLatestButton();
 }
@@ -17961,6 +18058,8 @@ function jumpToMessage(messageId,{smooth=true,highlight=true}={}){
   const bubble=messageBubbleById.get(Number(messageId));
   const row=bubble&&bubble.closest('.row');
   if(!row)return false;
+  chatFollowLatestIntent=false;
+  chatFollowResumeBlocked=true;
   chat.querySelectorAll('.messageJumpTarget').forEach(item=>
     item.classList.remove('messageJumpTarget'));
   if(highlight)row.classList.add('messageJumpTarget');
@@ -17985,6 +18084,9 @@ function jumpToMessage(messageId,{smooth=true,highlight=true}={}){
 }
 function addBubble(role, html, shareMeta=null){
   const wasNearBottom=chatIsNearBottom();
+  const localOutgoing=role==='user'&&shareMeta?.local_outgoing===true;
+  const shouldFollow=localOutgoing||
+    (wasNearBottom&&chatFollowLatestIntent);
   const contentText=document.createElement('div');
   contentText.innerHTML=html;
   const created=shareMeta&&shareMeta.created
@@ -18041,9 +18143,12 @@ function addBubble(role, html, shareMeta=null){
     order:Number.isFinite(+shareMeta.order)?+shareMeta.order:
       chat.querySelectorAll('.bubble').length-1
   });
-  if(!conversationBulkRendering&&(role==='user'||wasNearBottom)){
-    chat.scrollTop=chat.scrollHeight;
-    unseenResponseContent=false;
+  if(!conversationBulkRendering&&shouldFollow){
+    if(localOutgoing){
+      chatFollowLatestIntent=true;
+      chatFollowResumeBlocked=false;
+    }
+    followChatToLatest();
   }else if(!conversationBulkRendering){
     markNewResponseBelow();
   }
@@ -18142,6 +18247,8 @@ function renderConversationMessage(message,order=0){
 function setBubbleContent(bubble,html){
   if(!bubble) return;
   const wasNearBottom=chatIsNearBottom();
+  const shouldFollow=wasNearBottom&&chatFollowLatestIntent;
+  const interactionSequence=chatViewportInteractionSequence;
   let content=bubble.querySelector('.bubbleContent');
   if(!content){
     content=document.createElement('div');content.className='bubbleContent';
@@ -18149,10 +18256,10 @@ function setBubbleContent(bubble,html){
   }
   content.innerHTML=html;
   requestAnimationFrame(()=>{
-    if(wasNearBottom&&!mobileChatViewport()){
-      chat.scrollTop=chat.scrollHeight;
-      unseenResponseContent=false;
-    }else if(!chatIsNearBottom()){
+    if(shouldFollow&&chatFollowLatestIntent&&
+        interactionSequence===chatViewportInteractionSequence){
+      followChatToLatest();
+    }else if(!chatIsNearBottom()||!chatFollowLatestIntent){
       markNewResponseBelow();
     }
     if(!$('conversationSearchBar').hidden)scheduleConversationSearch();
@@ -18189,6 +18296,8 @@ function closeConversationSearch({restoreFocus=true}={}){
 }
 function focusConversationSearchMatch(index,{smooth=true}={}){
   if(!conversationSearchMatches.length)return;
+  chatFollowLatestIntent=false;
+  chatFollowResumeBlocked=true;
   const total=conversationSearchMatches.length;
   conversationSearchIndex=(index%total+total)%total;
   conversationSearchMatches.forEach((row,i)=>
@@ -19934,6 +20043,7 @@ async function openConv(id,options={}){
   setConversationOpening(id);
   let opened=false;
   let shouldFocusComposer=false;
+  let reloadViewport=null;
   try{
     const data=await api('/api/conversation?id='+encodeURIComponent(id)+
       '&limit='+CONVERSATION_PAGE_LIMIT);
@@ -19942,6 +20052,11 @@ async function openConv(id,options={}){
       showError(new Error(data.error));
       return;
     }
+    if((options.fromChatStatus||options.preserveView)&&
+        Number(id)===Number(convId))
+      reloadViewport=captureConversationReloadViewport({
+        markUnseen:!!options.fromChatStatus
+      });
     if(streaming)detachActiveChatStream();
     closeConversationSearch({restoreFocus:false});
     resetStoryFlow();
@@ -19994,6 +20109,13 @@ async function openConv(id,options={}){
       else if(!jumpToMessage(options.targetMessageId,{smooth:false,
           highlight:options.highlightTarget!==false}))
         scrollConversationToLatest();
+    }else if(reloadViewport){
+      if(reloadViewport.messageId&&
+          !messageBubbleById.has(Number(reloadViewport.messageId))&&
+          messageHistoryState.hasMore)
+        await loadMessageTarget(reloadViewport.messageId);
+      if(sequence!==openSequence)return;
+      restoreConversationReloadViewport(reloadViewport);
     }else scrollConversationToLatest();
     if(clinicalConversation(convData)){
       loadTechniqueRun(id);
@@ -20419,6 +20541,7 @@ async function send(forcedText, guidance, methodRef, sourceMessage){
   const userCreatedAt=localMessageCreated();
   const userBubble=addBubble('user',md(text),{
     role:'user',content:text,created:userCreatedAt,
+    local_outgoing:true,
     reply:replyForSend,
     order:chat.children.length
   });
@@ -26542,8 +26665,17 @@ chat.addEventListener('scroll',()=>{
   cancelAssistantReplySwipe();
   if(chatIsNearBottom()){
     unseenResponseContent=false;
+    if(!chatFollowResumeBlocked)chatFollowLatestIntent=true;
+    if(mobileChatViewport()&&document.activeElement===msgBox&&
+        composerScrollPolicy==='idle'&&!composerFollowSuspended&&
+        chatFollowLatestIntent)
+      useMobileComposerFollowLatest();
     syncScrollToLatestButton();
-  }else syncScrollToLatestButton();
+  }else{
+    chatFollowResumeBlocked=false;
+    composerFollowSuspended=false;
+    syncScrollToLatestButton();
+  }
 },{passive:true});
 document.addEventListener('visibilitychange',()=>{
   cancelMobileConversationLongPress();
@@ -34156,7 +34288,7 @@ msgBox.addEventListener('pointerdown',prepareMobileComposerAnchor,
   {passive:true});
 msgBox.addEventListener('click',reopenMobileComposer);
 msgBox.addEventListener('focus',()=>{
-  setMobileComposerAnchor(true);
+  captureMobileComposerScrollPolicy();
   scheduleMobileComposerAnchor();
 });
 msgBox.addEventListener('blur',()=>{
@@ -34164,9 +34296,20 @@ msgBox.addEventListener('blur',()=>{
     if(document.activeElement!==msgBox)clearMobileComposerAnchor();
   },0);
 });
-chat.addEventListener('touchstart',()=>{
-  if(document.activeElement===msgBox)clearMobileComposerAnchor();
-},{passive:true});
+function noteChatViewportInteraction(){
+  chatViewportInteractionSequence++;
+  chatFollowLatestIntent=false;
+  chatFollowResumeBlocked=true;
+  if(document.activeElement===msgBox){
+    clearMobileComposerAnchor();
+    composerFollowSuspended=true;
+  }
+}
+chat.addEventListener('pointerdown',noteChatViewportInteraction,
+  {passive:true});
+chat.addEventListener('touchstart',noteChatViewportInteraction,
+  {passive:true});
+chat.addEventListener('wheel',noteChatViewportInteraction,{passive:true});
 if(window.visualViewport){
   const syncMobileImeViewport=()=>{
     syncMobileViewportHeight();
@@ -34202,6 +34345,7 @@ window.divanAndroidViewportChanged=function(imeVisible){
   if(!androidNativeMobileContext())return false;
   if(imeVisible===false){
     forceAndroidImeViewportFallback();
+    clearMobileComposerAnchor();
     return true;
   }
   if(mobileTextEntryFocused()){

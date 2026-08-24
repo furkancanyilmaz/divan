@@ -261,16 +261,16 @@ class AndroidPackagingConsistencyTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_android_release_version_and_output_name_are_consistent(self):
-        self.assertIn("versionCode = 2026082214", self.gradle)
-        self.assertIn('versionName = "2026.08.22.14"', self.gradle)
-        self.assertIn('VERSION="2026.08.22.14"', self.command)
+        self.assertIn("versionCode = 2026082215", self.gradle)
+        self.assertIn('versionName = "2026.08.22.15"', self.gradle)
+        self.assertIn('VERSION="2026.08.22.15"', self.command)
         self.assertIn(
             "./gradlew clean verifyDivanEmbedding lintRelease assembleRelease",
             self.command,
         )
         self.assertIn('Divan-Android-$VERSION.apk', self.command)
-        self.assertIn("Divan-Android-2026.08.22.14.apk", self.readme)
-        self.assertIn("versionCode 2026082214", self.readme)
+        self.assertIn("Divan-Android-2026.08.22.15.apk", self.readme)
+        self.assertIn("versionCode 2026082215", self.readme)
 
     def test_android_readme_describes_tus_as_an_adhd_chat_mode(self):
         self.assertIn("**+ → TUS Çalışma**", self.readme)

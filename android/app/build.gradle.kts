@@ -19,8 +19,8 @@ android {
         applicationId = "com.furkancanyilmaz.divan"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2026082214
-        versionName = "2026.08.22.14"
+        versionCode = 2026082215
+        versionName = "2026.08.22.15"
 
         ndk {
             // Yeni 64-bit telefonlarla birlikte, Android'i 32-bit çalışan
@@ -89,7 +89,7 @@ val commonDivanFiles = listOf(
 )
 val expectedCommonSha256 = mapOf(
     "server.py" to "e205b2e1efc92575cb99262ea85812e4d986369dc4635193bd9e508d31a4fe7b",
-    "index.html" to "9c58ff43ae90febd61c4fe2066fd7ee7649fb232af44bd2a716dc287581672d0",
+    "index.html" to "5f03a514745ea90dedb53507393a05711e9432df67f48182868d18365eefb6ab",
     "secure_sync_transport.py" to "fef550a2b5d5c7ad27c62cbd679d5fdb07d621544ebc0edd98ac376c4f9dc5f4",
     "sync_engine.py" to "39005a82d5d358557e222e7de7a6c3a2284453ecf2a8ad69584a142dafacc512",
     "sync_service.py" to "aab750f309884aa84b5c47be106da03459066538a3dd71a76ed6112155f3580c",

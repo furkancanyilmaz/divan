@@ -3,7 +3,7 @@ set -euo pipefail
 
 HERE="${0:A:h}"
 cd "$HERE"
-VERSION="2026.08.22.14"
+VERSION="2026.08.22.15"
 
 # JDK 17 yolu sabit değildir (sürüm klasörü değişir, kurulum yeri makineye
 # göre farklıdır). Sırayla: ortamdaki JAVA_HOME → ~/jdks altındaki herhangi

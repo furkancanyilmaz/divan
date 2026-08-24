@@ -396,9 +396,9 @@ class AndroidNativeShellSourceContractTests(unittest.TestCase):
     def test_release_is_non_debuggable_and_keeps_installable_version(self):
         release = self.gradle.split("release {", 1)[1].split("}", 1)[0]
         self.assertIn("isDebuggable = false", release)
-        self.assertRegex(self.gradle, r"versionCode\s*=\s*2026082214\b")
+        self.assertRegex(self.gradle, r"versionCode\s*=\s*2026082215\b")
         self.assertRegex(
-            self.gradle, r'versionName\s*=\s*"2026\.08\.22\.14"')
+            self.gradle, r'versionName\s*=\s*"2026\.08\.22\.15"')
         self.assertIn('disable += "HighAppVersionCode"', self.gradle)
         self.assertIn("abortOnError = true", self.gradle)
 

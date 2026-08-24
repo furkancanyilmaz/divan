@@ -1,4 +1,5 @@
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -20,6 +21,17 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
         )
         self.assertIsNotNone(match, selector)
         return re.sub(r"\s+", "", match.group("body"))
+
+    def between(self, start, end):
+        left = self.html.index(start)
+        return self.html[left:self.html.index(end, left)]
+
+    def run_node(self, program):
+        result = subprocess.run(
+            ["node", "-e", program], capture_output=True,
+            text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_main_flex_chain_can_shrink_inside_the_viewport(self):
         main = self.css_block("#main")
@@ -493,10 +505,14 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
         )
         self.assertIn("anchorMobileResponseTurn(userBubble);", compact)
         self.assertIn(
-            "if(wasNearBottom&&!mobileChatViewport()){"
-            "chat.scrollTop=chat.scrollHeight;",
+            "if(shouldFollow&&chatFollowLatestIntent&&"
+            "interactionSequence===chatViewportInteractionSequence){"
+            "followChatToLatest();",
             compact,
         )
+        response_anchor = self.between(
+            "function anchorMobileResponseTurn(", "function T(")
+        self.assertNotIn("setTimeout(settle", response_anchor)
         self.assertIn("markNewResponseBelow();", compact)
         self.assertIn(
             "if(!$('endSessionOverlay').classList.contains('show'))"
@@ -507,7 +523,23 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
     def test_mobile_input_focus_keeps_latest_message_above_keyboard(self):
         compact = re.sub(r"\s+", "", self.html)
         self.assertIn(
-            "chat.scrollTop=Math.max(0,chat.scrollHeight-chat.clientHeight);",
+            "setChatScrollTop(chat.scrollHeight-chat.clientHeight);",
+            compact,
+        )
+        self.assertIn("functioncaptureMobileComposerScrollPolicy(", compact)
+        self.assertIn("composerScrollPolicy='preserve';", compact)
+        self.assertIn(
+            "composerReadingAnchor=captureChatViewportAnchor();", compact)
+        restore_anchor = self.between(
+            "function restoreChatViewportAnchor(",
+            "function captureConversationReloadViewport(",
+        )
+        self.assertIn("chat.style.scrollBehavior='auto';", restore_anchor)
+        self.assertIn("chat.style.overflowAnchor='none';", restore_anchor)
+        self.assertIn(
+            "if(composerScrollPolicy==='follow')"
+            "alignLatestMessageAboveComposer();"
+            "elserestoreMobileComposerReadingPosition();",
             compact,
         )
         self.assertIn(
@@ -846,21 +878,191 @@ class ResponsiveLayoutSourceTests(unittest.TestCase):
             "functionprepareMobileComposerAnchor(){"
             "if(!mobileChatViewport())return;"
             "syncMobileViewportHeight();"
-            "setMobileComposerAnchor(true);scheduleMobileComposerAnchor();}",
+            "captureMobileComposerScrollPolicy({refresh:true});}",
             compact,
         )
         self.assertIn(
             "functionreopenMobileComposer(){"
             "if(!mobileChatViewport())return;"
             "syncMobileViewportHeight();pinMobileRootScroll();"
+            "captureMobileComposerScrollPolicy();"
             "focusWithoutScrolling(msgBox);"
-            "setMobileComposerAnchor(true);",
+            "scheduleMobileComposerAnchor();",
             compact,
         )
+        self.assertIn("composerFollowSuspended=true;", compact)
+        self.assertIn("!composerFollowSuspended", compact)
         self.assertIn(
             "-webkit-tap-highlight-color:transparent;"
             "touch-action:manipulation",
             compact,
+        )
+
+    def test_mobile_chat_scroll_policy_preserves_reader_intent(self):
+        chat_helpers = self.between(
+            "function chatDistanceFromBottom()",
+            "function revealChatElementNearest(",
+        )
+        composer_helpers = self.between(
+            "function setMobileComposerAnchor(",
+            "let keyboardFocusIntent=",
+        )
+        bubble_content = self.between(
+            "function setBubbleContent(",
+            "function clearConversationSearchMarks(",
+        )
+        program = r"""
+let unseenResponseContent=false;
+let chatFollowLatestIntent=true,chatFollowResumeBlocked=false;
+let composerAnchorActive=false,composerScrollPolicy='idle';
+let composerReadingAnchor=null,composerFollowSuspended=false;
+let composerAnchorSequence=0,composerAnchorSettleTimer=null;
+let chatViewportInteractionSequence=0;
+let convId=7,convData={id:7};
+const msgBox={};
+const classNames=new Set();
+const classList={
+  toggle(name,on){if(on)classNames.add(name);else classNames.delete(name);},
+  contains(name){return classNames.has(name);},add(name){classNames.add(name);},
+  remove(name){classNames.delete(name);}
+};
+const row={isConnected:true,contentTop:340,
+  getBoundingClientRect(){
+    const top=this.contentTop-chat.scrollTop;
+    return {top,bottom:top+80,height:80};
+  },
+  querySelector(){return null;}
+};
+const buttonClasses=new Set();
+const latestButton={label:'',classList:{
+  toggle(name,on){if(on)buttonClasses.add(name);else buttonClasses.delete(name);}
+},setAttribute(){}};
+const searchBar={hidden:true};
+const chat={scrollHeight:1200,clientHeight:400,scrollTop:800,
+  style:{scrollBehavior:'smooth',overflowAnchor:''},classList,
+  querySelector(selector){return selector==='.row'?row:null;},
+  querySelectorAll(selector){return selector===':scope > .row'?[row]:[];},
+  getBoundingClientRect(){return {top:0,bottom:this.clientHeight};}
+};
+const document={activeElement:null,body:{classList},
+  contains(node){return node===row;},
+  createElement(){throw new Error('unexpected element creation');}
+};
+function $(id){
+  if(id==='scrollToLatestBtn')return latestButton;
+  if(id==='conversationSearchBar')return searchBar;
+  return null;
+}
+function setUiButtonLabel(id,label){latestButton.label=label;}
+function mobileChatViewport(){return true;}
+function pinMobileRootScroll(){}
+function syncMobileViewportHeight(){}
+function scheduleConversationSearch(){}
+const raf=[];
+let nextTimer=0;
+const timers=new Map();
+function requestAnimationFrame(callback){raf.push(callback);return raf.length;}
+function setTimeout(callback){const id=++nextTimer;timers.set(id,callback);return id;}
+function clearTimeout(id){timers.delete(id);}
+function flush(){
+  let guard=0;
+  while((raf.length||timers.size)&&guard++<30){
+    while(raf.length)raf.shift()();
+    const pending=[...timers.values()];timers.clear();
+    pending.forEach(callback=>callback());
+  }
+  if(guard>=30)throw new Error('settle loop did not finish');
+}
+""" + chat_helpers + composer_helpers + bubble_content + r"""
+// IME opens while already at the latest message: keep the latest row pinned.
+prepareMobileComposerAnchor();
+if(composerScrollPolicy!=='follow')throw new Error('bottom intent not captured');
+document.activeElement=msgBox;
+chat.clientHeight=240;
+scheduleMobileComposerAnchor();flush();
+if(chat.scrollTop!==960||chatDistanceFromBottom()!==0)
+  throw new Error('latest message was not pinned above composer');
+
+// IME opens while reading history: restore the visible row, never jump down.
+clearMobileComposerAnchor();
+document.activeElement=null;
+chat.scrollHeight=1200;chat.clientHeight=400;chat.scrollTop=300;
+row.contentTop=340;
+prepareMobileComposerAnchor();
+if(composerScrollPolicy!=='preserve')throw new Error('reader intent not captured');
+document.activeElement=msgBox;
+chat.clientHeight=240;chat.scrollTop=390;
+scheduleMobileComposerAnchor();flush();
+if(chat.scrollTop!==300||row.getBoundingClientRect().top!==40)
+  throw new Error('older-message anchor was not preserved');
+
+// A streaming response follows only while follow-latest intent is still true.
+clearMobileComposerAnchor();
+document.activeElement=null;
+chatFollowLatestIntent=true;chatFollowResumeBlocked=false;
+chatViewportInteractionSequence=0;unseenResponseContent=false;
+chat.scrollHeight=1200;chat.clientHeight=400;chat.scrollTop=800;
+const content={innerHTML:''};
+const bubble={querySelector(){return content;},prepend(){}};
+setBubbleContent(bubble,'first');chat.scrollHeight=1400;flush();
+if(chat.scrollTop!==1000||unseenResponseContent)
+  throw new Error('near-bottom response did not follow');
+
+// Reading older messages keeps its offset and surfaces the unseen response.
+chatFollowLatestIntent=false;chatFollowResumeBlocked=true;
+unseenResponseContent=false;buttonClasses.clear();latestButton.label='';
+chat.scrollHeight=1200;chat.clientHeight=400;chat.scrollTop=300;
+setBubbleContent(bubble,'second');chat.scrollHeight=1400;flush();
+if(chat.scrollTop!==300||!unseenResponseContent||
+    !buttonClasses.has('show')||latestButton.label!=='Yeni yanıta in')
+  throw new Error('older reader was moved or unseen response was hidden');
+
+// A user gesture invalidates pending IME settling before its delayed pass.
+clearMobileComposerAnchor();
+chatFollowLatestIntent=true;chatFollowResumeBlocked=false;
+chat.scrollHeight=1200;chat.clientHeight=400;chat.scrollTop=800;
+document.activeElement=null;prepareMobileComposerAnchor();
+document.activeElement=msgBox;chat.clientHeight=240;
+scheduleMobileComposerAnchor();
+chatViewportInteractionSequence++;
+clearMobileComposerAnchor();composerFollowSuspended=true;
+flush();
+if(chat.scrollTop!==800)throw new Error('cancelled settle yanked the reader');
+"""
+        self.run_node(program)
+
+    def test_background_reload_and_durable_messages_preserve_reader(self):
+        compact = re.sub(r"\s+", "", self.html)
+        add_bubble = self.between(
+            "function addBubble(", "function renderSchemaBindingResult(")
+        self.assertIn(
+            "constlocalOutgoing=role==='user'&&"
+            "shareMeta?.local_outgoing===true;",
+            re.sub(r"\s+", "", add_bubble),
+        )
+        self.assertNotIn("role==='user'||", add_bubble)
+        self.assertIn("local_outgoing:true,", compact)
+
+        open_conversation = self.between(
+            "async function openConv(", "function selectedRadioValue(")
+        reload_compact = re.sub(r"\s+", "", open_conversation)
+        self.assertIn(
+            "if((options.fromChatStatus||options.preserveView)&&"
+            "Number(id)===Number(convId))",
+            reload_compact,
+        )
+        self.assertIn(
+            "reloadViewport=captureConversationReloadViewport({"
+            "markUnseen:!!options.fromChatStatus});",
+            reload_compact,
+        )
+        self.assertIn(
+            "awaitloadMessageTarget(reloadViewport.messageId);",
+            reload_compact,
+        )
+        self.assertIn(
+            "restoreConversationReloadViewport(reloadViewport);",
+            reload_compact,
         )
 
     def test_message_times_are_outside_shareable_content_and_use_saved_values(self):

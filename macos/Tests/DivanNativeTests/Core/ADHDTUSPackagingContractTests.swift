@@ -9,7 +9,7 @@ final class ADHDTUSPackagingContractTests: XCTestCase {
     private let serverSHA256 =
         "e205b2e1efc92575cb99262ea85812e4d986369dc4635193bd9e508d31a4fe7b"
     private let indexSHA256 =
-        "9c58ff43ae90febd61c4fe2066fd7ee7649fb232af44bd2a716dc287581672d0"
+        "5f03a514745ea90dedb53507393a05711e9432df67f48182868d18365eefb6ab"
     private let catalogBytes = 3_780_233
 
     func testAuthoritativeCatalogIsPinnedMetadataOnlyV1() throws {
@@ -80,8 +80,8 @@ final class ADHDTUSPackagingContractTests: XCTestCase {
         let build = try script("build_preview_zip.sh")
         let verify = try script("verify_package.sh")
         for source in [build, verify] {
-            XCTAssertTrue(source.contains("2026.08.22.14"))
-            XCTAssertTrue(source.contains("2026082214"))
+            XCTAssertTrue(source.contains("2026.08.22.15"))
+            XCTAssertTrue(source.contains("2026082215"))
             XCTAssertFalse(source.contains("2026.08.22.10"))
             XCTAssertFalse(source.contains("2026082210"))
         }

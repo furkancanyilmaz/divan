@@ -5,7 +5,7 @@ uygulamasında çalıştıran özel APK projesidir.
 
 ## Telefonda kullanım
 
-1. `Divan-Android-2026.08.22.14.apk` dosyasını telefona gönderin.
+1. `Divan-Android-2026.08.22.15.apk` dosyasını telefona gönderin.
 2. Telefonda dosyaya dokunun. Android isterse kullandığınız Dosyalar
    uygulamasına “bilinmeyen uygulama yükleme” izni verin.
 3. **Yükle**, ardından **Aç** seçeneğine dokunun.
@@ -288,4 +288,4 @@ gerekir. Hazırlama komutu beklenen anahtarın SHA-256 özeti uyuşmazsa yeni bi
 anahtarla uyumsuz paket üretmek yerine derlemeyi durdurur. Bu yapı Google Play
 yayını değil, kişisel doğrudan kurulum içindir.
 
-Bu kaynak ağacının sürümü **2026.08.22.14**’tür (`versionCode 2026082214`).
+Bu kaynak ağacının sürümü **2026.08.22.15**’tir (`versionCode 2026082215`).
